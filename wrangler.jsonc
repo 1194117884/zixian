@@ -6,7 +6,7 @@
     {
       "binding": "DB",
       "database_name": "zixian-db",
-      "database_id": "REPLACE_WITH_ZIXIAN_D1_DATABASE_ID",
+      "database_id": "5d3e4ef3-51c1-4c7f-a8a6-ed93b0642606",
       "migrations_dir": "migrations"
     }
   ],
