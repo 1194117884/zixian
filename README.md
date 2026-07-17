@@ -7,13 +7,14 @@
 - 选择设计语言并引用为创作上下文
 - 输入内容与补充要求
 - 在隔离的 HTML `iframe` 中实时预览
-- 模拟积分生成、高清导出和静态分享链接
+- 邮箱验证码登录、会话恢复与 Turnstile 人机验证
+- 保存安全 HTML、发布静态分享链接，以及 Browser Run 高清导出
 
 当前版本已建立 Cloudflare Worker、D1 迁移与 R2 绑定骨架；真实模型、支付与 Browser Run 将在后续任务接入。
 
 ## 本地预览
 
-这是一个无构建步骤的静态 Web 原型。使用任意静态文件服务器从项目根目录打开 `index.html` 即可。Worker 侧使用 `npm install` 后可执行 `npm test`；部署前需将 `wrangler.jsonc` 中的 D1 ID 替换为真实值。
+这是一个无构建步骤的 Web 原型。生产环境由同一个 Worker 同源提供 `index.html`、CSS、JS 与 `/api/*`，让安全 Cookie 可以正常工作。Worker 侧使用 `npm install` 后可执行 `npm test`；部署前需将 `wrangler.jsonc` 中的 D1 ID 替换为真实值。
 
 ## 环境变量
 
@@ -22,11 +23,13 @@
 - Secrets：`AUTH_PEPPER`、`TURNSTILE_SECRET_KEY`、`RESEND_API_KEY`、各模型 API Key
 - 非敏感配置：`RESEND_FROM`、`TURNSTILE_SITE_KEY`、`APP_ORIGIN`
 
+`TURNSTILE_SITE_KEY` 会被 `/api/public-config` 返回给浏览器，这是 Turnstile 设计上可公开的站点键；其余认证和邮件密钥不会进入前端。Cloudflare 部署时，在 Worker 的 Variables 中填写该站点键，并将三个敏感认证值设为 Secrets。
+
 ## 代码边界
 
-- `index.html`：创作工作台结构
+- `index.html`：创作工作台与无密码登录界面
 - `styles.css`：视觉系统与响应式布局
-- `app.js`：风格切换、文本安全转义、隔离预览和交互反馈
+- `app.js`：风格切换、文本安全转义、隔离预览、登录和真实保存/发布/导出请求
 
 ## 安全原则
 

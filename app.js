@@ -5,12 +5,27 @@ const styleName = document.querySelector('#style-name');
 const preview = document.querySelector('#preview');
 const paper = document.querySelector('#paper-wrap');
 const toast = document.querySelector('#toast');
+const authDialog = document.querySelector('#auth-dialog');
+const emailForm = document.querySelector('#email-form');
+const codeForm = document.querySelector('#code-form');
+const authMessage = document.querySelector('#auth-message');
 const styleNames = { note: 'Apple Notes', board: '手写板书', magazine: '编辑杂志', social: '知识卡片' };
 let selectedStyle = 'note';
 let zoom = 67;
+let currentUser = null;
+let currentDocumentId = null;
+let turnstileToken = null;
+let turnstileWidgetId = null;
 
 function escapeHtml(value) {
   return value.replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, { credentials: 'same-origin', ...options });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw Object.assign(new Error(body.message || body.error || 'request_failed'), { code: body.error, status: response.status });
+  return body;
 }
 
 function renderDocument() {
@@ -36,38 +51,136 @@ function showToast(message) {
   showToast.timer = setTimeout(() => toast.classList.remove('show'), 2400);
 }
 
-content.addEventListener('input', () => { count.textContent = content.value.length; renderDocument(); });
+function updateProfile(user) {
+  currentUser = user;
+  document.querySelector('#profile-name').textContent = user ? user.email : '登录以保存作品';
+  document.querySelector('#profile-detail').textContent = user ? '个人创作空间' : '登录后可发布与导出';
+  document.querySelector('#avatar').textContent = user ? user.email.slice(0, 1).toUpperCase() : '字';
+}
+
+function openLogin() {
+  authMessage.textContent = '';
+  authMessage.classList.remove('error');
+  emailForm.hidden = false;
+  codeForm.hidden = true;
+  authDialog.showModal();
+  document.querySelector('#email').focus();
+}
+
+function setAuthMessage(message, isError = false) {
+  authMessage.textContent = message;
+  authMessage.classList.toggle('error', isError);
+}
+
+async function setupTurnstile() {
+  const { turnstileSiteKey } = await api('/api/public-config').catch(() => ({}));
+  if (!turnstileSiteKey) return setAuthMessage('登录验证尚未配置。', true);
+  await new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    script.async = true;
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.append(script);
+  }).catch(() => setAuthMessage('无法加载安全验证，请检查网络。', true));
+  if (!window.turnstile) return;
+  turnstileWidgetId = window.turnstile.render('#turnstile', { sitekey: turnstileSiteKey, callback: token => { turnstileToken = token; }, 'expired-callback': () => { turnstileToken = null; } });
+}
+
+async function requireLogin() {
+  if (currentUser) return true;
+  openLogin();
+  return false;
+}
+
+async function saveDocument() {
+  if (!await requireLogin()) return null;
+  if (!content.value.trim()) {
+    showToast('先写下一点想表达的内容吧');
+    return null;
+  }
+  const saved = await api('/api/documents', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: content.value.trim().split(/\n/)[0].slice(0, 80), content: content.value, style: selectedStyle, instruction: instruction.value }) });
+  currentDocumentId = saved.id;
+  return saved;
+}
+
+content.addEventListener('input', () => { count.textContent = content.value.length; currentDocumentId = null; renderDocument(); });
+instruction.addEventListener('input', () => { currentDocumentId = null; });
 document.querySelector('#styles').addEventListener('click', event => {
   const card = event.target.closest('.style-card');
   if (!card) return;
   selectedStyle = card.dataset.style;
+  currentDocumentId = null;
   document.querySelectorAll('.style-card').forEach(item => item.classList.toggle('selected', item === card));
   styleName.textContent = styleNames[selectedStyle];
   renderDocument();
   showToast(`已切换为「${styleNames[selectedStyle]}」设计语言`);
 });
-document.querySelector('#generate').addEventListener('click', () => {
-  if (!content.value.trim()) return showToast('先写下一点想表达的内容吧');
-  renderDocument();
-  showToast('作品已生成 · 已扣除 6 积分');
+document.querySelector('#generate').addEventListener('click', async () => {
+  try {
+    await saveDocument();
+    if (currentDocumentId) showToast('安全作品已保存');
+  } catch (error) {
+    showToast(error.code === 'unauthorized' ? '登录已失效，请重新登录' : '保存失败，请稍后重试');
+  }
 });
 document.querySelector('#clear-instruction').addEventListener('click', () => { instruction.value = ''; instruction.focus(); });
-document.querySelector('#share').addEventListener('click', () => document.querySelector('#share-dialog').showModal());
+document.querySelector('#share').addEventListener('click', async () => {
+  try {
+    if (!currentDocumentId) await saveDocument();
+    if (!currentDocumentId) return;
+    const page = await api(`/api/documents/${currentDocumentId}/publish`, { method: 'POST' });
+    document.querySelector('.share-url code').textContent = page.url;
+    document.querySelector('#share-dialog').showModal();
+  } catch { showToast('发布失败，请稍后重试'); }
+});
+document.querySelector('#export').addEventListener('click', async () => {
+  try {
+    if (!currentDocumentId) await saveDocument();
+    if (!currentDocumentId) return;
+    showToast('正在生成高清图…');
+    const output = await api(`/api/documents/${currentDocumentId}/exports`, { method: 'POST' });
+    window.location.assign(output.downloadUrl);
+  } catch { showToast('导出暂不可用，请稍后重试'); }
+});
 document.querySelector('#close-dialog').addEventListener('click', () => document.querySelector('#share-dialog').close());
 document.querySelector('#copy-link').addEventListener('click', async () => {
-  await navigator.clipboard?.writeText('https://m7k2q.zijian.page');
+  await navigator.clipboard?.writeText(document.querySelector('.share-url code').textContent);
   showToast('分享链接已复制');
 });
-document.querySelector('#export').addEventListener('click', () => showToast('正在生成高清图 · 完成后将自动下载'));
 document.querySelector('#new-work').addEventListener('click', () => {
-  content.value = '';
-  instruction.value = '';
-  count.textContent = '0';
-  renderDocument();
-  content.focus();
-  showToast('已新建空白作品');
+  content.value = ''; instruction.value = ''; count.textContent = '0'; currentDocumentId = null; renderDocument(); content.focus(); showToast('已新建空白作品');
 });
 document.querySelector('#zoom-in').addEventListener('click', () => { zoom = Math.min(100, zoom + 11); paper.style.transform = `scale(${zoom / 67})`; document.querySelector('#zoom').textContent = `${zoom}%`; });
 document.querySelector('#zoom-out').addEventListener('click', () => { zoom = Math.max(45, zoom - 11); paper.style.transform = `scale(${zoom / 67})`; document.querySelector('#zoom').textContent = `${zoom}%`; });
+document.querySelector('#login').addEventListener('click', () => currentUser ? api('/api/auth/logout', { method: 'POST' }).then(() => { updateProfile(null); currentDocumentId = null; showToast('已登出'); }) : openLogin());
+document.querySelector('#close-auth').addEventListener('click', () => authDialog.close());
+document.querySelector('#change-email').addEventListener('click', () => { codeForm.hidden = true; emailForm.hidden = false; setAuthMessage(''); });
+emailForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!turnstileToken) return setAuthMessage('请先完成安全验证。', true);
+  const button = document.querySelector('#request-code');
+  button.disabled = true;
+  try {
+    await api('/api/auth/request-code', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: document.querySelector('#email').value, turnstileToken }) });
+    emailForm.hidden = true; codeForm.hidden = false; setAuthMessage('验证码已发送，请查收邮箱。'); document.querySelector('#code').focus();
+  } catch (error) {
+    setAuthMessage(error.code === 'rate_limited' ? '请求过于频繁，请稍后再试。' : '无法发送验证码，请检查邮箱与验证。', true);
+    turnstileToken = null;
+    if (turnstileWidgetId !== null) window.turnstile?.reset(turnstileWidgetId);
+  } finally { button.disabled = false; }
+});
+codeForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = document.querySelector('#verify-code');
+  button.disabled = true;
+  try {
+    const result = await api('/api/auth/verify-code', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: document.querySelector('#email').value, code: document.querySelector('#code').value }) });
+    updateProfile(result.user); authDialog.close(); showToast('登录成功，作品会安全保存');
+  } catch { setAuthMessage('验证码无效或已过期。', true); } finally { button.disabled = false; }
+});
 document.addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') document.querySelector('#generate').click(); });
+
+api('/api/auth/me').then(result => updateProfile(result.user)).catch(() => updateProfile(null));
+setupTurnstile();
 renderDocument();

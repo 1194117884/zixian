@@ -20,6 +20,13 @@ test('unknown endpoint returns a JSON 404', async () => {
   assert.deepEqual(await response.json(), { error: 'not_found' });
 });
 
+test('public config exposes only the Turnstile site key', async () => {
+  const response = await worker.fetch(new Request('https://example.test/api/public-config'), { TURNSTILE_SITE_KEY: 'public-site-key', AUTH_PEPPER: 'must-not-leak' });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { turnstileSiteKey: 'public-site-key' });
+});
+
 test('safe document escapes user-provided markup and has no script execution', () => {
   const html = createSafeDocument({
     title: '<img src=x onerror=alert(1)>',

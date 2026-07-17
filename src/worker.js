@@ -2,7 +2,7 @@ import { createSafeDocument, supportedStyles } from './safe-document.js';
 import { modelCatalog } from './models.js';
 import { reserveGenerationCredits } from './credits.js';
 import { exportObjectKey, renderHtmlToPng } from './export.js';
-import { createCode, createSession, hashSecret, normalizeEmail, sendCodeEmail, sessionCookie, sessionUserId, validEmail, validateTurnstile } from './auth.js';
+import { clearSessionCookie, createCode, createSession, hashSecret, normalizeEmail, sendCodeEmail, sessionCookie, sessionUserId, validEmail, validateTurnstile } from './auth.js';
 
 const json = (body, init = {}) => new Response(JSON.stringify(body), {
   ...init,
@@ -174,6 +174,14 @@ async function verifyLoginCode(request, env) {
   return json({ user: { id: user.id, email } }, { headers: { 'set-cookie': sessionCookie(token) } });
 }
 
+async function logout(request, env) {
+  const token = (request.headers.get('cookie') || '').match(/(?:^|;\s*)zijian_session=([^;]+)/)?.[1];
+  if (token && env.AUTH_PEPPER) {
+    await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(await hashSecret(token, env.AUTH_PEPPER)).run();
+  }
+  return json({ ok: true }, { headers: { 'set-cookie': clearSessionCookie } });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -186,8 +194,13 @@ export default {
       return json({ models: Object.entries(modelCatalog).map(([id, model]) => ({ id, label: model.label, credits: model.credits })) });
     }
 
+    if (request.method === 'GET' && url.pathname === '/api/public-config') {
+      return json({ turnstileSiteKey: env.TURNSTILE_SITE_KEY || null });
+    }
+
     if (request.method === 'POST' && url.pathname === '/api/auth/request-code') return requestLoginCode(request, env);
     if (request.method === 'POST' && url.pathname === '/api/auth/verify-code') return verifyLoginCode(request, env);
+    if (request.method === 'POST' && url.pathname === '/api/auth/logout') return logout(request, env);
     if (request.method === 'GET' && url.pathname === '/api/auth/me') {
       const currentUserId = await sessionUserId(request, env);
       if (!currentUserId) return json({ error: 'unauthorized' }, { status: 401 });
