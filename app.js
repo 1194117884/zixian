@@ -83,23 +83,8 @@ function setAuthMessage(message, isError = false) {
 async function setupTurnstile() {
   const { turnstileSiteKey } = await api('/api/public-config').catch(() => ({}));
   if (!turnstileSiteKey) return setAuthMessage('登录验证尚未配置。', true);
-  const turnstileUrl = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
-  let script = document.querySelector(`script[src="${turnstileUrl}"]`);
-  const createdScript = !script;
-  if (!script) {
-    script = document.createElement('script');
-    script.src = turnstileUrl;
-    script.async = true;
-    document.head.append(script);
-  }
-  if (createdScript && typeof window.turnstile?.render !== 'function') {
-    await new Promise((resolve, reject) => {
-      script.addEventListener('load', resolve, { once: true });
-      script.addEventListener('error', reject, { once: true });
-    }).catch(() => null);
-  }
-  if (typeof window.turnstile?.ready === 'function') {
-    await new Promise(resolve => window.turnstile.ready(resolve));
+  for (let attempt = 0; attempt < 50 && typeof window.turnstile?.render !== 'function'; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 100));
   }
   if (typeof window.turnstile?.render !== 'function') return setAuthMessage('无法加载安全验证，请检查网络。', true);
   turnstileWidgetId = window.turnstile.render('#turnstile', { sitekey: turnstileSiteKey, callback: token => { turnstileToken = token; }, 'expired-callback': () => { turnstileToken = null; } });
