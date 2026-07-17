@@ -1,6 +1,17 @@
-# Never commit actual secrets. Copy to .dev.vars when connecting a model provider.
-MODEL_PROVIDER_API_KEY=
+# Never commit actual secrets. Copy this file to .dev.vars for local development.
+# Cloudflare production values use `wrangler secret put <NAME>` or the Worker dashboard.
+
+# Required security and authentication secrets
 AUTH_PEPPER=
 TURNSTILE_SECRET_KEY=
 RESEND_API_KEY=
+
+# Model-provider secrets (enable only the providers you offer)
+DEEPSEEK_API_KEY=
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+
+# Non-secret runtime configuration
 RESEND_FROM=字见 <login@auth.example.com>
+TURNSTILE_SITE_KEY=
+APP_ORIGIN=http://localhost:4173

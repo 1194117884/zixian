@@ -15,6 +15,13 @@
 
 这是一个无构建步骤的静态 Web 原型。使用任意静态文件服务器从项目根目录打开 `index.html` 即可。Worker 侧使用 `npm install` 后可执行 `npm test`；部署前需将 `wrangler.jsonc` 中的 D1 ID 替换为真实值。
 
+## 环境变量
+
+本地填写 `.dev.vars`；该文件已被 Git 忽略。部署到 Cloudflare 后，敏感值使用 `wrangler secret put <变量名>` 或 Worker Dashboard 的 Secrets 配置，非敏感值使用环境变量配置。
+
+- Secrets：`AUTH_PEPPER`、`TURNSTILE_SECRET_KEY`、`RESEND_API_KEY`、各模型 API Key
+- 非敏感配置：`RESEND_FROM`、`TURNSTILE_SITE_KEY`、`APP_ORIGIN`
+
 ## 代码边界
 
 - `index.html`：创作工作台结构
