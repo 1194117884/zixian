@@ -11,6 +11,11 @@ DEEPSEEK_API_KEY=
 OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 
+# Optional provider endpoint overrides for OpenAI-compatible gateways
+DEEPSEEK_BASE_URL=
+OPENAI_BASE_URL=
+ANTHROPIC_BASE_URL=
+
 # Non-secret runtime configuration
 RESEND_FROM=字见 <login@auth.example.com>
 TURNSTILE_SITE_KEY=

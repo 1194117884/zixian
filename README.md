@@ -10,7 +10,7 @@
 - 邮箱验证码登录、会话恢复与 Turnstile 人机验证
 - 保存安全 HTML、发布静态分享链接，以及 Browser Run 高清导出
 
-当前版本已建立 Cloudflare Worker、D1 迁移与 R2 绑定骨架；真实模型、支付与 Browser Run 将在后续任务接入。
+当前版本已建立 Cloudflare Worker、D1/R2、Browser Run、认证和模型适配器；支付与真实扣费生成闭环将在后续任务接入。
 
 ## 本地预览
 
