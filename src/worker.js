@@ -115,7 +115,7 @@ async function serveExport(request, env, exportId) {
   if (!record) return json({ error: 'not_found' }, { status: 404 });
   const object = await env.ASSETS.get(record.object_key);
   if (!object) return json({ error: 'not_found' }, { status: 404 });
-  return new Response(object.body, { headers: { 'content-type': 'image/png', 'content-disposition': `attachment; filename="zijian-${exportId}.png"` } });
+  return new Response(object.body, { headers: { 'content-type': 'image/png', 'content-disposition': `attachment; filename="zixian-${exportId}.png"` } });
 }
 
 async function createGenerationJob(request, env) {
@@ -213,7 +213,7 @@ async function verifyLoginCode(request, env) {
 }
 
 async function logout(request, env) {
-  const token = (request.headers.get('cookie') || '').match(/(?:^|;\s*)zijian_session=([^;]+)/)?.[1];
+  const token = (request.headers.get('cookie') || '').match(/(?:^|;\s*)zixian_session=([^;]+)/)?.[1];
   if (token && env.AUTH_PEPPER) {
     await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(await hashSecret(token, env.AUTH_PEPPER)).run();
   }
@@ -225,7 +225,7 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === 'GET' && url.pathname === '/api/health') {
-      return json({ ok: true, service: 'zijian-api', environment: env.APP_ORIGIN ? 'configured' : 'unconfigured' });
+      return json({ ok: true, service: 'zixian-api', environment: env.APP_ORIGIN ? 'configured' : 'unconfigured' });
     }
 
     if (request.method === 'GET' && url.pathname === '/api/models') {

@@ -1,19 +1,19 @@
 {
-  "name": "zijian-api",
+  "name": "zixian-api",
   "main": "src/worker.js",
   "compatibility_date": "2026-07-17",
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "zijian-db",
-      "database_id": "84ffaad6-7dca-445c-82f9-cef42519b192",
+      "database_name": "zixian-db",
+      "database_id": "REPLACE_WITH_ZIXIAN_D1_DATABASE_ID",
       "migrations_dir": "migrations"
     }
   ],
   "r2_buckets": [
     {
       "binding": "ASSETS",
-      "bucket_name": "zijian-assets"
+      "bucket_name": "zixian-assets"
     }
   ],
   "browser": {

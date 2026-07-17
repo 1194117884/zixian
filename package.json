@@ -1,5 +1,5 @@
 {
-  "name": "zijian",
+  "name": "zixian",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,7 +7,7 @@
     "test": "node --test",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:migrate": "wrangler d1 migrations apply zijian-db --remote"
+    "db:migrate": "wrangler d1 migrations apply zixian-db --remote"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

@@ -40,7 +40,7 @@ export async function sendCodeEmail({ email, code, env, fetcher = fetch }) {
 const readCookie = (request, name) => Object.fromEntries((request.headers.get('cookie') || '').split(';').filter(Boolean).map(item => item.trim().split('=')))[name];
 
 export async function sessionUserId(request, env) {
-  const token = readCookie(request, 'zijian_session');
+  const token = readCookie(request, 'zixian_session');
   if (!token || !env.AUTH_PEPPER) return null;
   const tokenHash = await hashSecret(token, env.AUTH_PEPPER);
   const session = await env.DB.prepare("SELECT user_id FROM sessions WHERE token_hash = ? AND expires_at > CURRENT_TIMESTAMP").bind(tokenHash).first();
@@ -54,5 +54,5 @@ export async function createSession(userId, env) {
   return token;
 }
 
-export const sessionCookie = token => `zijian_session=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_MAX_AGE}`;
-export const clearSessionCookie = 'zijian_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0';
+export const sessionCookie = token => `zixian_session=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_MAX_AGE}`;
+export const clearSessionCookie = 'zixian_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0';
