@@ -6,7 +6,7 @@
     {
       "binding": "DB",
       "database_name": "zijian-db",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_id": "84ffaad6-7dca-445c-82f9-cef42519b192",
       "migrations_dir": "migrations"
     }
   ],
