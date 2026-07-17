@@ -1,6 +1,7 @@
 import { createSafeDocument, supportedStyles } from './safe-document.js';
 import { modelCatalog } from './models.js';
 import { reserveGenerationCredits } from './credits.js';
+import { grantTestCredits } from './payments.js';
 import { exportObjectKey, renderHtmlToPng } from './export.js';
 import { clearSessionCookie, createCode, createSession, hashSecret, normalizeEmail, sendCodeEmail, sessionCookie, sessionUserId, validEmail, validateTurnstile } from './auth.js';
 
@@ -139,6 +140,20 @@ async function createGenerationJob(request, env) {
   }
 }
 
+async function wallet(request, env) {
+  const ownerId = await sessionUserId(request, env);
+  if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
+  const record = await env.DB.prepare('SELECT balance FROM wallets WHERE user_id = ?').bind(ownerId).first();
+  return json({ balance: record?.balance ?? 0 });
+}
+
+async function testPayment(request, env) {
+  const ownerId = await sessionUserId(request, env);
+  if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
+  if (env.PAYMENTS_MODE !== 'test') return json({ error: 'test_payments_disabled' }, { status: 403 });
+  return json({ test: true, ...(await grantTestCredits({ db: env.DB, userId: ownerId })) }, { status: 201 });
+}
+
 async function requestLoginCode(request, env) {
   const payload = await request.json().catch(() => null);
   const email = normalizeEmail(payload?.email);
@@ -207,6 +222,9 @@ export default {
       const user = await env.DB.prepare('SELECT id, email FROM users WHERE id = ?').bind(currentUserId).first();
       return json({ user });
     }
+
+    if (request.method === 'GET' && url.pathname === '/api/wallet') return wallet(request, env);
+    if (request.method === 'POST' && url.pathname === '/api/test-payments') return testPayment(request, env);
 
     if (request.method === 'POST' && url.pathname === '/api/generation-jobs') return createGenerationJob(request, env);
 

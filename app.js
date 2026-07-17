@@ -9,6 +9,7 @@ const authDialog = document.querySelector('#auth-dialog');
 const emailForm = document.querySelector('#email-form');
 const codeForm = document.querySelector('#code-form');
 const authMessage = document.querySelector('#auth-message');
+const paymentDialog = document.querySelector('#payment-dialog');
 const styleNames = { note: 'Apple Notes', board: '手写板书', magazine: '编辑杂志', social: '知识卡片' };
 let selectedStyle = 'note';
 let zoom = 67;
@@ -56,6 +57,13 @@ function updateProfile(user) {
   document.querySelector('#profile-name').textContent = user ? user.email : '登录以保存作品';
   document.querySelector('#profile-detail').textContent = user ? '个人创作空间' : '登录后可发布与导出';
   document.querySelector('#avatar').textContent = user ? user.email.slice(0, 1).toUpperCase() : '字';
+  if (!user) document.querySelector('#credit-balance').textContent = '—';
+}
+
+async function loadWallet() {
+  if (!currentUser) return;
+  const wallet = await api('/api/wallet');
+  document.querySelector('#credit-balance').textContent = wallet.balance;
 }
 
 function openLogin() {
@@ -154,6 +162,30 @@ document.querySelector('#new-work').addEventListener('click', () => {
 document.querySelector('#zoom-in').addEventListener('click', () => { zoom = Math.min(100, zoom + 11); paper.style.transform = `scale(${zoom / 67})`; document.querySelector('#zoom').textContent = `${zoom}%`; });
 document.querySelector('#zoom-out').addEventListener('click', () => { zoom = Math.max(45, zoom - 11); paper.style.transform = `scale(${zoom / 67})`; document.querySelector('#zoom').textContent = `${zoom}%`; });
 document.querySelector('#login').addEventListener('click', () => currentUser ? api('/api/auth/logout', { method: 'POST' }).then(() => { updateProfile(null); currentDocumentId = null; showToast('已登出'); }) : openLogin());
+document.querySelector('#buy-credits').addEventListener('click', async () => {
+  if (!await requireLogin()) return;
+  document.querySelector('#payment-message').textContent = '';
+  paymentDialog.showModal();
+});
+document.querySelector('#close-payment').addEventListener('click', () => paymentDialog.close());
+document.querySelector('#complete-test-payment').addEventListener('click', async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = '正在模拟 Stripe 支付…';
+  try {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    const payment = await api('/api/test-payments', { method: 'POST' });
+    document.querySelector('#credit-balance').textContent = payment.balance;
+    document.querySelector('#payment-message').textContent = `测试成功，已入账 ${payment.credits} 积分。`;
+    showToast(`测试支付成功 · +${payment.credits} 积分`);
+    setTimeout(() => paymentDialog.close(), 900);
+  } catch (error) {
+    document.querySelector('#payment-message').textContent = error.code === 'test_payments_disabled' ? '测试支付未开启。' : '测试入账失败，请稍后重试。';
+  } finally {
+    button.disabled = false;
+    button.textContent = '模拟支付并入账';
+  }
+});
 document.querySelector('#close-auth').addEventListener('click', () => authDialog.close());
 document.querySelector('#change-email').addEventListener('click', () => { codeForm.hidden = true; emailForm.hidden = false; setAuthMessage(''); });
 emailForm.addEventListener('submit', async event => {
@@ -176,11 +208,11 @@ codeForm.addEventListener('submit', async event => {
   button.disabled = true;
   try {
     const result = await api('/api/auth/verify-code', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: document.querySelector('#email').value, code: document.querySelector('#code').value }) });
-    updateProfile(result.user); authDialog.close(); showToast('登录成功，作品会安全保存');
+    updateProfile(result.user); await loadWallet(); authDialog.close(); showToast('登录成功，作品会安全保存');
   } catch { setAuthMessage('验证码无效或已过期。', true); } finally { button.disabled = false; }
 });
 document.addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') document.querySelector('#generate').click(); });
 
-api('/api/auth/me').then(result => updateProfile(result.user)).catch(() => updateProfile(null));
+api('/api/auth/me').then(async result => { updateProfile(result.user); await loadWallet(); }).catch(() => updateProfile(null));
 setupTurnstile();
 renderDocument();

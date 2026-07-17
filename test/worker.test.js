@@ -5,6 +5,7 @@ import { createSafeDocument } from '../src/safe-document.js';
 import { createCompositionPrompt, generateComposition, getModel, parseComposition } from '../src/models.js';
 import { exportObjectKey, renderHtmlToPng } from '../src/export.js';
 import { hashSecret, normalizeEmail, validEmail } from '../src/auth.js';
+import { grantTestCredits } from '../src/payments.js';
 
 test('health endpoint identifies the worker', async () => {
   const response = await worker.fetch(new Request('https://example.test/api/health'), { APP_ORIGIN: 'http://localhost:4173' });
@@ -93,4 +94,21 @@ test('email identities normalize and OTP hashes do not expose the code', async (
   assert.equal(validEmail('hello@example.com'), true);
   assert.equal(validEmail('not-an-email'), false);
   assert.notEqual(await hashSecret('123456', 'test-pepper'), '123456');
+});
+
+test('test payment credits the normal wallet ledger without calling Stripe', async () => {
+  const statements = [];
+  const db = {
+    prepare(sql) {
+      return { bind(...values) { statements.push({ sql, values }); return { first: async () => ({ balance: 100 }) }; } };
+    },
+    batch: async () => undefined
+  };
+
+  const result = await grantTestCredits({ db, userId: 'u1' });
+
+  assert.equal(result.credits, 100);
+  assert.equal(result.balance, 100);
+  assert.match(statements[0].sql, /UPDATE wallets SET balance = balance \+ \?/);
+  assert.match(statements[1].sql, /'purchase'/);
 });

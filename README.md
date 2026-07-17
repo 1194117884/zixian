@@ -25,6 +25,10 @@
 
 `TURNSTILE_SITE_KEY` 会被 `/api/public-config` 返回给浏览器，这是 Turnstile 设计上可公开的站点键；其余认证和邮件密钥不会进入前端。Cloudflare 部署时，在 Worker 的 Variables 中填写该站点键，并将三个敏感认证值设为 Secrets。
 
+## 测试充值
+
+设置 `PAYMENTS_MODE=test` 后，积分卡片会显示一个“模拟 Stripe”流程：等待约 1.2 秒后将 100 积分写入正常的钱包与账本。它不会连接 Stripe、不会创建支付订单、也不会扣款。部署真实收费前，必须移除此变量和 `/api/test-payments` 路由，并改为经 Stripe webhook 验签入账。
+
 ## 代码边界
 
 - `index.html`：创作工作台与无密码登录界面

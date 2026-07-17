@@ -20,3 +20,6 @@ ANTHROPIC_BASE_URL=
 RESEND_FROM=字见 <login@auth.example.com>
 TURNSTILE_SITE_KEY=
 APP_ORIGIN=http://localhost:4173
+
+# Test-only: enables the fake Stripe success flow. Never use this for real payments.
+PAYMENTS_MODE=test
