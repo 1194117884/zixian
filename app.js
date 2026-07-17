@@ -83,15 +83,25 @@ function setAuthMessage(message, isError = false) {
 async function setupTurnstile() {
   const { turnstileSiteKey } = await api('/api/public-config').catch(() => ({}));
   if (!turnstileSiteKey) return setAuthMessage('登录验证尚未配置。', true);
-  await new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+  const turnstileUrl = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+  let script = document.querySelector(`script[src="${turnstileUrl}"]`);
+  const createdScript = !script;
+  if (!script) {
+    script = document.createElement('script');
+    script.src = turnstileUrl;
     script.async = true;
-    script.onload = resolve;
-    script.onerror = reject;
     document.head.append(script);
-  }).catch(() => setAuthMessage('无法加载安全验证，请检查网络。', true));
-  if (!window.turnstile) return;
+  }
+  if (createdScript && typeof window.turnstile?.render !== 'function') {
+    await new Promise((resolve, reject) => {
+      script.addEventListener('load', resolve, { once: true });
+      script.addEventListener('error', reject, { once: true });
+    }).catch(() => null);
+  }
+  if (typeof window.turnstile?.ready === 'function') {
+    await new Promise(resolve => window.turnstile.ready(resolve));
+  }
+  if (typeof window.turnstile?.render !== 'function') return setAuthMessage('无法加载安全验证，请检查网络。', true);
   turnstileWidgetId = window.turnstile.render('#turnstile', { sitekey: turnstileSiteKey, callback: token => { turnstileToken = token; }, 'expired-callback': () => { turnstileToken = null; } });
 }
 
