@@ -125,11 +125,28 @@ document.querySelector('#styles').addEventListener('click', event => {
   showToast(`已切换为「${styleNames[selectedStyle]}」设计语言`);
 });
 document.querySelector('#generate').addEventListener('click', async () => {
+  if (!await requireLogin()) return;
+  if (!content.value.trim()) return showToast('先写下一点想表达的内容吧');
+  const button = document.querySelector('#generate');
+  button.disabled = true;
+  button.textContent = '正在生成…';
   try {
-    await saveDocument();
-    if (currentDocumentId) showToast('安全作品已保存');
+    const result = await api('/api/generation-jobs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
+      body: JSON.stringify({ modelId: 'fast', title: content.value.trim().split(/\n/)[0], content: content.value, instruction: instruction.value, style: selectedStyle })
+    });
+    content.value = [result.composition.title, ...result.composition.paragraphs, result.composition.highlight].join('\n\n');
+    count.textContent = content.value.length;
+    currentDocumentId = result.document.id;
+    renderDocument();
+    await loadWallet();
+    showToast('作品已生成并安全保存');
   } catch (error) {
-    showToast(error.code === 'unauthorized' ? '登录已失效，请重新登录' : '保存失败，请稍后重试');
+    showToast(error.code === 'insufficient_credits' ? '积分不足，请先测试充值' : '生成失败，积分已退回');
+  } finally {
+    button.disabled = false;
+    button.innerHTML = '生成作品 <span>✦ 6</span>';
   }
 });
 document.querySelector('#clear-instruction').addEventListener('click', () => { instruction.value = ''; instruction.focus(); });

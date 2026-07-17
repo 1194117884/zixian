@@ -6,6 +6,7 @@ import { createCompositionPrompt, generateComposition, getModel, parseCompositio
 import { exportObjectKey, renderHtmlToPng } from '../src/export.js';
 import { hashSecret, normalizeEmail, validEmail } from '../src/auth.js';
 import { grantTestCredits } from '../src/payments.js';
+import { refundGenerationCredits } from '../src/credits.js';
 
 test('health endpoint identifies the worker', async () => {
   const response = await worker.fetch(new Request('https://example.test/api/health'), { APP_ORIGIN: 'http://localhost:4173' });
@@ -111,4 +112,20 @@ test('test payment credits the normal wallet ledger without calling Stripe', asy
   assert.equal(result.balance, 100);
   assert.match(statements[0].sql, /UPDATE wallets SET balance = balance \+ \?/);
   assert.match(statements[1].sql, /'purchase'/);
+});
+
+test('failed generation refunds only through the existing credit ledger', async () => {
+  const statements = [];
+  const db = {
+    prepare(sql) {
+      return { bind(...values) { statements.push({ sql, values }); return {}; } };
+    },
+    batch: async () => undefined
+  };
+
+  await refundGenerationCredits({ db, ownerId: 'u1', jobId: 'j1', credits: 6 });
+
+  assert.match(statements[0].sql, /status = 'refunded'/);
+  assert.match(statements[1].sql, /'refund'/);
+  assert.match(statements[2].sql, /balance = balance \+ \?/);
 });

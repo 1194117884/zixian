@@ -9,6 +9,7 @@
 - 在隔离的 HTML `iframe` 中实时预览
 - 邮箱验证码登录、会话恢复与 Turnstile 人机验证
 - 保存安全 HTML、发布静态分享链接，以及 Browser Run 高清导出
+- 预扣积分后调用模型；模型只生成受限文案 JSON，失败自动退款
 
 当前版本已建立 Cloudflare Worker、D1/R2、Browser Run、认证和模型适配器；支付与真实扣费生成闭环将在后续任务接入。
 

@@ -1,6 +1,6 @@
 import { createSafeDocument, supportedStyles } from './safe-document.js';
-import { modelCatalog } from './models.js';
-import { reserveGenerationCredits } from './credits.js';
+import { generateComposition, modelCatalog } from './models.js';
+import { refundGenerationCredits, reserveGenerationCredits } from './credits.js';
 import { grantTestCredits } from './payments.js';
 import { exportObjectKey, renderHtmlToPng } from './export.js';
 import { clearSessionCookie, createCode, createSession, hashSecret, normalizeEmail, sendCodeEmail, sessionCookie, sessionUserId, validEmail, validateTurnstile } from './auth.js';
@@ -24,15 +24,11 @@ function badRequest(message) {
   return json({ error: 'bad_request', message }, { status: 400 });
 }
 
-async function createDocument(request, env) {
-  const ownerId = await sessionUserId(request, env);
-  if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
+function validDocumentPayload(payload) {
+  return payload && typeof payload.content === 'string' && payload.content.trim() && payload.content.length <= 10000 && supportedStyles.includes(payload.style);
+}
 
-  const payload = await request.json().catch(() => null);
-  if (!payload || typeof payload.content !== 'string' || !payload.content.trim()) return badRequest('content is required');
-  if (payload.content.length > 10000) return badRequest('content exceeds 10,000 characters');
-  if (!supportedStyles.includes(payload.style)) return badRequest('unsupported style');
-
+async function createDocumentForOwner({ ownerId, payload, env }) {
   const documentId = id();
   const versionId = id();
   const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim().slice(0, 120) : '未命名作品';
@@ -46,7 +42,15 @@ async function createDocument(request, env) {
     env.DB.prepare('INSERT INTO document_versions (id, document_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?)').bind(versionId, documentId, JSON.stringify({ content: payload.content, style: payload.style }), objectKey, 'approved')
   ]);
 
-  return json({ id: documentId, versionId, title, status: 'draft' }, { status: 201 });
+  return { id: documentId, versionId, title, status: 'draft' };
+}
+
+async function createDocument(request, env) {
+  const ownerId = await sessionUserId(request, env);
+  if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
+  const payload = await request.json().catch(() => null);
+  if (!validDocumentPayload(payload)) return badRequest('valid content and style are required');
+  return json(await createDocumentForOwner({ ownerId, payload, env }), { status: 201 });
 }
 
 async function publishDocument(request, env, documentId) {
@@ -121,7 +125,7 @@ async function createGenerationJob(request, env) {
   const idempotencyKey = request.headers.get('idempotency-key');
   if (!idempotencyKey) return badRequest('idempotency-key header is required');
   const payload = await request.json().catch(() => null);
-  if (!payload || typeof payload.modelId !== 'string') return badRequest('modelId is required');
+  if (!validDocumentPayload(payload) || typeof payload.modelId !== 'string') return badRequest('valid content, style, and modelId are required');
 
   try {
     const reservation = await reserveGenerationCredits({
@@ -133,7 +137,26 @@ async function createGenerationJob(request, env) {
     });
 
     if (reservation.state === 'insufficient_credits') return json({ error: 'insufficient_credits' }, { status: 402 });
-    return json(reservation, { status: reservation.state === 'existing' ? 200 : 201 });
+    if (reservation.state === 'existing') return json(reservation, { status: 200 });
+
+    await env.DB.prepare("UPDATE generation_jobs SET status = 'running' WHERE id = ? AND owner_id = ?").bind(reservation.job.id, ownerId).run();
+    try {
+      const composition = await generateComposition({
+        modelId: payload.modelId,
+        title: payload.title,
+        content: payload.content,
+        instruction: payload.instruction,
+        style: payload.style,
+        env
+      });
+      const generatedContent = [...composition.paragraphs, composition.highlight].join('\n\n');
+      const document = await createDocumentForOwner({ ownerId, payload: { title: composition.title, content: generatedContent, style: payload.style }, env });
+      await env.DB.prepare("UPDATE generation_jobs SET document_id = ?, status = 'succeeded', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?").bind(document.id, reservation.job.id, ownerId).run();
+      return json({ job: { ...reservation.job, status: 'succeeded' }, document, composition }, { status: 201 });
+    } catch (error) {
+      await refundGenerationCredits({ db: env.DB, ownerId, jobId: reservation.job.id, credits: reservation.job.costCredits });
+      return json({ error: error.message === 'invalid_model_output' ? 'model_output_invalid' : 'model_unavailable' }, { status: 503 });
+    }
   } catch (error) {
     if (error.message === 'unsupported_model') return badRequest('unsupported model');
     throw error;

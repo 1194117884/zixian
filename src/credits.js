@@ -21,3 +21,12 @@ export async function reserveGenerationCredits({ db, ownerId, documentId, modelI
   if (results[0].meta.changes !== 1) return { state: 'insufficient_credits' };
   return { state: 'reserved', job: { id: jobId, status: 'queued', costCredits: model.credits } };
 }
+
+export async function refundGenerationCredits({ db, ownerId, jobId, credits }) {
+  const refundKey = `refund:${jobId}`;
+  await db.batch([
+    db.prepare("UPDATE generation_jobs SET status = 'refunded', error_code = 'model_unavailable', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ? AND status IN ('queued', 'running')").bind(jobId, ownerId),
+    db.prepare("INSERT INTO credit_ledger (id, user_id, amount, reason, generation_job_id, idempotency_key) SELECT ?, ?, ?, 'refund', ?, ? WHERE changes() = 1").bind(id(), ownerId, credits, jobId, refundKey),
+    db.prepare('UPDATE wallets SET balance = balance + ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND changes() = 1').bind(credits, ownerId)
+  ]);
+}
