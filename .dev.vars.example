@@ -1,0 +1,2 @@
+# Never commit actual secrets. Copy to .dev.vars when connecting a model provider.
+MODEL_PROVIDER_API_KEY=

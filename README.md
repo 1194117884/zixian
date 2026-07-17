@@ -9,11 +9,11 @@
 - 在隔离的 HTML `iframe` 中实时预览
 - 模拟积分生成、高清导出和静态分享链接
 
-当前版本刻意不接入真实模型、支付或 Cloudflare 资源；这些能力将在创作体验和数据边界稳定后，以 Worker、D1、R2 与 Browser Run 接入。
+当前版本已建立 Cloudflare Worker、D1 迁移与 R2 绑定骨架；真实模型、支付与 Browser Run 将在后续任务接入。
 
 ## 本地预览
 
-这是一个无构建步骤的静态 Web 原型。使用任意静态文件服务器从项目根目录打开 `index.html` 即可。
+这是一个无构建步骤的静态 Web 原型。使用任意静态文件服务器从项目根目录打开 `index.html` 即可。Worker 侧使用 `npm install` 后可执行 `npm test`；部署前需将 `wrangler.jsonc` 中的 D1 ID 替换为真实值。
 
 ## 代码边界
 

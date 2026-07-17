@@ -1,0 +1,22 @@
+{
+  "name": "zijian-api",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-07-17",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "zijian-db",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "zijian-assets"
+    }
+  ],
+  "vars": {
+    "APP_ORIGIN": "http://localhost:4173"
+  }
+}
