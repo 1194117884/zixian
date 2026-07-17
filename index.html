@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>字见 · 把想法变成可分享的视觉作品</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#"><span class="brand-mark">字</span><span>字见</span></a>
+        <button class="new-work" id="new-work"><span>+</span> 新建作品 <kbd>⌘ K</kbd></button>
+        <nav>
+          <a class="active" href="#"><span>✦</span> 创作</a>
+          <a href="#"><span>◫</span> 我的作品</a>
+          <a href="#"><span>⌁</span> 风格库</a>
+          <a href="#"><span>♧</span> 已发布</a>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="credit-card"><span class="spark">✦</span><div><b>248</b><small>可用积分</small></div><button aria-label="充值">+</button></div>
+          <div class="profile"><span class="avatar">Y</span><div><b>Yong</b><small>个人创作空间</small></div><button>···</button></div>
+        </div>
+      </aside>
+      <section class="workspace">
+        <header class="topbar"><div><p class="eyebrow">DRAFT / 01</p><h1>未命名作品 <span class="saved">已保存</span></h1></div><div class="top-actions"><button class="ghost" id="share">分享链接</button><button class="dark" id="export">导出高清图 <span>↗</span></button></div></header>
+        <div class="canvas-grid">
+          <section class="composer" aria-label="创作输入">
+            <div class="section-heading"><span>01</span><h2>选择设计语言</h2><button>浏览全部 →</button></div>
+            <div class="styles" id="styles">
+              <button class="style-card selected" data-style="note"><span class="style-preview note-preview"><i></i><i></i><i></i></span><b>Apple Notes</b><small>克制 · 分层</small></button>
+              <button class="style-card" data-style="board"><span class="style-preview board-preview">说<br><em>清</em>楚</span><b>手写板书</b><small>鲜明 · 观点</small></button>
+              <button class="style-card" data-style="magazine"><span class="style-preview magazine-preview"><em>04</em> 一种<br>表达</span><b>编辑杂志</b><small>留白 · 评论</small></button>
+              <button class="style-card" data-style="social"><span class="style-preview social-preview"><i>IDEA</i><b>想法</b><em>→</em></span><b>知识卡片</b><small>轻快 · 重点</small></button>
+            </div>
+            <div class="section-heading content-title"><span>02</span><h2>放进你的内容</h2></div>
+            <label class="content-box"><span>你的想法、文章或一段文字</span><textarea id="content" placeholder="把想要分享的内容粘贴在这里…">好的表达，不是把所有话都说出来。
+
+而是让真正重要的那一句，被看见、被停留，也被记住。
+
+信息越多的时候，留白越是一种能力。</textarea><small><span id="count">62</span> / 3,000</small></label>
+            <div class="instruction"><div class="instruction-top"><span class="at">@</span><span id="style-name">Apple Notes</span><button id="clear-instruction" title="清空">×</button></div><textarea id="instruction" placeholder="补充你的生成要求（可选）">我想让内容有清晰的分层，最后一句作为总结突出。</textarea><div class="instruction-footer"><span>⌘ Enter 生成</span><button id="generate">生成作品 <span>✦ 6</span></button></div></div>
+          </section>
+          <section class="preview-panel" aria-label="作品预览">
+            <div class="preview-header"><div><span class="live-dot"></span> 实时预览</div><div class="preview-controls"><button id="zoom-out">−</button><span id="zoom">67%</span><button id="zoom-in">+</button></div></div>
+            <div class="preview-stage"><div class="paper-wrap" id="paper-wrap"><iframe id="preview" title="作品预览" sandbox=""></iframe></div></div>
+            <div class="preview-footer"><span><i></i> 安全 HTML 已生成</span><span>1080 × 1440 px</span></div>
+          </section>
+        </div>
+      </section>
+    </main>
+    <div class="toast" id="toast" role="status"></div>
+    <dialog id="share-dialog"><button class="dialog-close" id="close-dialog">×</button><p class="eyebrow">已发布为只读网页</p><h2>你的作品已准备好分享</h2><p>此链接指向一个固定、安全的 HTML 快照。</p><div class="share-url"><code>m7k2q.zijian.page</code><button id="copy-link">复制</button></div><small>原始内容与创作记录不会暴露给访问者。</small></dialog>
+    <script src="/app.js"></script>
+  </body>
+</html>
