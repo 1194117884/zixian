@@ -2,6 +2,7 @@ import { createSafeDocument, supportedStyles } from './safe-document.js';
 import { modelCatalog } from './models.js';
 import { reserveGenerationCredits } from './credits.js';
 import { exportObjectKey, renderHtmlToPng } from './export.js';
+import { createCode, createSession, hashSecret, normalizeEmail, sendCodeEmail, sessionCookie, sessionUserId, validEmail, validateTurnstile } from './auth.js';
 
 const json = (body, init = {}) => new Response(JSON.stringify(body), {
   ...init,
@@ -15,7 +16,6 @@ const htmlHeaders = {
   'x-content-type-options': 'nosniff'
 };
 
-const userId = request => request.headers.get('x-user-id');
 const id = () => crypto.randomUUID();
 const slug = () => crypto.randomUUID().replaceAll('-', '').slice(0, 10);
 
@@ -24,7 +24,7 @@ function badRequest(message) {
 }
 
 async function createDocument(request, env) {
-  const ownerId = userId(request);
+  const ownerId = await sessionUserId(request, env);
   if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
 
   const payload = await request.json().catch(() => null);
@@ -49,7 +49,7 @@ async function createDocument(request, env) {
 }
 
 async function publishDocument(request, env, documentId) {
-  const ownerId = userId(request);
+  const ownerId = await sessionUserId(request, env);
   if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
 
   const document = await env.DB.prepare('SELECT id, current_version_id FROM documents WHERE id = ? AND owner_id = ?').bind(documentId, ownerId).first();
@@ -81,7 +81,7 @@ async function servePublishedPage(env, publicSlug) {
 }
 
 async function createExport(request, env, documentId) {
-  const ownerId = userId(request);
+  const ownerId = await sessionUserId(request, env);
   if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
 
   const version = await env.DB.prepare('SELECT v.id, v.html_object_key FROM documents d JOIN document_versions v ON v.id = d.current_version_id WHERE d.id = ? AND d.owner_id = ? AND v.safety_status = ?').bind(documentId, ownerId, 'approved').first();
@@ -103,7 +103,7 @@ async function createExport(request, env, documentId) {
 }
 
 async function serveExport(request, env, exportId) {
-  const ownerId = userId(request);
+  const ownerId = await sessionUserId(request, env);
   if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
 
   const record = await env.DB.prepare('SELECT object_key FROM exports WHERE id = ? AND owner_id = ?').bind(exportId, ownerId).first();
@@ -114,7 +114,7 @@ async function serveExport(request, env, exportId) {
 }
 
 async function createGenerationJob(request, env) {
-  const ownerId = userId(request);
+  const ownerId = await sessionUserId(request, env);
   if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
 
   const idempotencyKey = request.headers.get('idempotency-key');
@@ -139,6 +139,41 @@ async function createGenerationJob(request, env) {
   }
 }
 
+async function requestLoginCode(request, env) {
+  const payload = await request.json().catch(() => null);
+  const email = normalizeEmail(payload?.email);
+  if (!validEmail(email) || !await validateTurnstile(payload?.turnstileToken, request, env)) return json({ error: 'verification_required' }, { status: 400 });
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const limits = await Promise.all([env.AUTH_RATE_LIMIT.limit({ key: `email:${email}` }), env.AUTH_RATE_LIMIT.limit({ key: `ip:${ip}` })]);
+  if (limits.some(result => !result.success)) return json({ error: 'rate_limited' }, { status: 429 });
+  const recent = await env.DB.prepare("SELECT id FROM email_codes WHERE email = ? AND created_at > datetime('now', '-60 seconds')").bind(email).first();
+  if (recent) return json({ error: 'rate_limited' }, { status: 429 });
+  const code = createCode();
+  await sendCodeEmail({ email, code, env });
+  await env.DB.prepare("INSERT INTO email_codes (id, email, code_hash, expires_at) VALUES (?, ?, ?, datetime('now', '+10 minutes'))").bind(id(), email, await hashSecret(code, env.AUTH_PEPPER)).run();
+  return json({ ok: true }, { status: 202 });
+}
+
+async function verifyLoginCode(request, env) {
+  const payload = await request.json().catch(() => null);
+  const email = normalizeEmail(payload?.email);
+  const code = typeof payload?.code === 'string' ? payload.code : '';
+  if (!validEmail(email) || !/^\d{6}$/.test(code)) return badRequest('invalid email or code');
+  const record = await env.DB.prepare("SELECT id, code_hash FROM email_codes WHERE email = ? AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP ORDER BY created_at DESC LIMIT 1").bind(email).first();
+  if (!record || record.code_hash !== await hashSecret(code, env.AUTH_PEPPER)) return json({ error: 'invalid_code' }, { status: 401 });
+  await env.DB.prepare('UPDATE email_codes SET consumed_at = CURRENT_TIMESTAMP WHERE id = ?').bind(record.id).run();
+  let user = await env.DB.prepare('SELECT id, email FROM users WHERE email = ?').bind(email).first();
+  if (!user) {
+    user = { id: id(), email };
+    await env.DB.batch([
+      env.DB.prepare('INSERT INTO users (id, email) VALUES (?, ?)').bind(user.id, email),
+      env.DB.prepare('INSERT INTO wallets (user_id, balance) VALUES (?, ?)').bind(user.id, 0)
+    ]);
+  }
+  const token = await createSession(user.id, env);
+  return json({ user: { id: user.id, email } }, { headers: { 'set-cookie': sessionCookie(token) } });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -149,6 +184,15 @@ export default {
 
     if (request.method === 'GET' && url.pathname === '/api/models') {
       return json({ models: Object.entries(modelCatalog).map(([id, model]) => ({ id, label: model.label, credits: model.credits })) });
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/auth/request-code') return requestLoginCode(request, env);
+    if (request.method === 'POST' && url.pathname === '/api/auth/verify-code') return verifyLoginCode(request, env);
+    if (request.method === 'GET' && url.pathname === '/api/auth/me') {
+      const currentUserId = await sessionUserId(request, env);
+      if (!currentUserId) return json({ error: 'unauthorized' }, { status: 401 });
+      const user = await env.DB.prepare('SELECT id, email FROM users WHERE id = ?').bind(currentUserId).first();
+      return json({ user });
     }
 
     if (request.method === 'POST' && url.pathname === '/api/generation-jobs') return createGenerationJob(request, env);

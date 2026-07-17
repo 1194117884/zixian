@@ -4,6 +4,7 @@ import worker from '../src/worker.js';
 import { createSafeDocument } from '../src/safe-document.js';
 import { createCompositionPrompt, getModel, parseComposition } from '../src/models.js';
 import { exportObjectKey, renderHtmlToPng } from '../src/export.js';
+import { hashSecret, normalizeEmail, validEmail } from '../src/auth.js';
 
 test('health endpoint identifies the worker', async () => {
   const response = await worker.fetch(new Request('https://example.test/api/health'), { APP_ORIGIN: 'http://localhost:4173' });
@@ -36,12 +37,12 @@ test('model catalog exposes fixed credit costs', () => {
   assert.equal(getModel('missing'), null);
 });
 
-test('generation job requires identity and an idempotency key before billing', async () => {
+test('generation job requires a signed session before billing', async () => {
   const noIdentity = await worker.fetch(new Request('https://example.test/api/generation-jobs', { method: 'POST', body: '{}' }), {});
   const noKey = await worker.fetch(new Request('https://example.test/api/generation-jobs', { method: 'POST', headers: { 'x-user-id': 'u1' }, body: '{}' }), {});
 
   assert.equal(noIdentity.status, 401);
-  assert.equal(noKey.status, 400);
+  assert.equal(noKey.status, 401);
 });
 
 test('model composition only accepts a bounded structured response', () => {
@@ -63,4 +64,11 @@ test('export uses a fixed R2 key and stores Browser Run PNG output', async () =>
 
   assert.equal(exportObjectKey({ documentId: 'd1', versionId: 'v1', exportId: 'e1' }), 'documents/d1/versions/v1/exports/e1.png');
   assert.equal(await new Response(await renderHtmlToPng(browser, '<h1>视觉作品</h1>')).text(), 'png-bytes');
+});
+
+test('email identities normalize and OTP hashes do not expose the code', async () => {
+  assert.equal(normalizeEmail('  Hello@Example.COM '), 'hello@example.com');
+  assert.equal(validEmail('hello@example.com'), true);
+  assert.equal(validEmail('not-an-email'), false);
+  assert.notEqual(await hashSecret('123456', 'test-pepper'), '123456');
 });

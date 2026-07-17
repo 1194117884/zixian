@@ -1,2 +1,6 @@
 # Never commit actual secrets. Copy to .dev.vars when connecting a model provider.
 MODEL_PROVIDER_API_KEY=
+AUTH_PEPPER=
+TURNSTILE_SECRET_KEY=
+RESEND_API_KEY=
+RESEND_FROM=字见 <login@auth.example.com>
