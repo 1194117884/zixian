@@ -17,6 +17,9 @@ let currentUser = null;
 let currentDocumentId = null;
 let turnstileToken = null;
 let turnstileWidgetId = null;
+const requestCodeButton = document.querySelector('#request-code');
+
+window.onTurnstileLoad = () => setupTurnstile();
 
 function escapeHtml(value) {
   return value.replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
@@ -81,13 +84,15 @@ function setAuthMessage(message, isError = false) {
 }
 
 async function setupTurnstile() {
+  if (turnstileWidgetId !== null || typeof window.turnstile?.render !== 'function') return;
   const { turnstileSiteKey } = await api('/api/public-config').catch(() => ({}));
   if (!turnstileSiteKey) return setAuthMessage('登录验证尚未配置。', true);
-  for (let attempt = 0; attempt < 50 && typeof window.turnstile?.render !== 'function'; attempt += 1) {
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-  if (typeof window.turnstile?.render !== 'function') return setAuthMessage('无法加载安全验证，请检查网络。', true);
-  turnstileWidgetId = window.turnstile.render('#turnstile', { sitekey: turnstileSiteKey, callback: token => { turnstileToken = token; }, 'expired-callback': () => { turnstileToken = null; } });
+  turnstileWidgetId = window.turnstile.render('#turnstile', {
+    sitekey: turnstileSiteKey,
+    callback: token => { turnstileToken = token; requestCodeButton.disabled = false; requestCodeButton.textContent = '发送验证码'; },
+    'expired-callback': () => { turnstileToken = null; requestCodeButton.disabled = true; },
+    'error-callback': () => setAuthMessage('安全验证暂不可用，请刷新页面后重试。', true)
+  });
 }
 
 async function requireLogin() {
@@ -203,7 +208,7 @@ document.querySelector('#change-email').addEventListener('click', () => { codeFo
 emailForm.addEventListener('submit', async event => {
   event.preventDefault();
   if (!turnstileToken) return setAuthMessage('请先完成安全验证。', true);
-  const button = document.querySelector('#request-code');
+  const button = requestCodeButton;
   button.disabled = true;
   try {
     await api('/api/auth/request-code', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: document.querySelector('#email').value, turnstileToken }) });
@@ -226,5 +231,8 @@ codeForm.addEventListener('submit', async event => {
 document.addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') document.querySelector('#generate').click(); });
 
 api('/api/auth/me').then(async result => { updateProfile(result.user); await loadWallet(); }).catch(() => updateProfile(null));
-setupTurnstile();
+if (typeof window.turnstile?.render === 'function') setupTurnstile();
+setTimeout(() => {
+  if (turnstileWidgetId === null) setAuthMessage('无法加载安全验证，请检查网络后刷新页面。', true);
+}, 6000);
 renderDocument();
