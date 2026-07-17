@@ -23,6 +23,12 @@
     "directory": ".",
     "run_worker_first": ["/api/*", "/p/*"]
   },
+  "routes": [
+    {
+      "pattern": "zixian.yongkl.cc",
+      "custom_domain": true
+    }
+  ],
   "ratelimits": [
     {
       "name": "AUTH_RATE_LIMIT",
