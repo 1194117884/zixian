@@ -16,6 +16,9 @@
       "bucket_name": "zijian-assets"
     }
   ],
+  "browser": {
+    "binding": "BROWSER"
+  },
   "vars": {
     "APP_ORIGIN": "http://localhost:4173"
   }

@@ -3,6 +3,7 @@ import test from 'node:test';
 import worker from '../src/worker.js';
 import { createSafeDocument } from '../src/safe-document.js';
 import { createCompositionPrompt, getModel, parseComposition } from '../src/models.js';
+import { exportObjectKey, renderHtmlToPng } from '../src/export.js';
 
 test('health endpoint identifies the worker', async () => {
   const response = await worker.fetch(new Request('https://example.test/api/health'), { APP_ORIGIN: 'http://localhost:4173' });
@@ -50,4 +51,16 @@ test('model composition only accepts a bounded structured response', () => {
   assert.match(prompt, /Return JSON only/);
   assert.deepEqual(composition, { title: '标题', paragraphs: ['第一段', '第二段'], highlight: '重点' });
   assert.throws(() => parseComposition('{"title":"x"}'), /invalid_model_output/);
+});
+
+test('export uses a fixed R2 key and stores Browser Run PNG output', async () => {
+  const browser = { quickAction: async (action, request) => {
+    assert.equal(action, 'screenshot');
+    assert.equal(request.viewport.width, 1080);
+    assert.match(request.html, /视觉作品/);
+    return new Response('png-bytes', { status: 200 });
+  } };
+
+  assert.equal(exportObjectKey({ documentId: 'd1', versionId: 'v1', exportId: 'e1' }), 'documents/d1/versions/v1/exports/e1.png');
+  assert.equal(await new Response(await renderHtmlToPng(browser, '<h1>视觉作品</h1>')).text(), 'png-bytes');
 });

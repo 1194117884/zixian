@@ -1,6 +1,7 @@
 import { createSafeDocument, supportedStyles } from './safe-document.js';
 import { modelCatalog } from './models.js';
 import { reserveGenerationCredits } from './credits.js';
+import { exportObjectKey, renderHtmlToPng } from './export.js';
 
 const json = (body, init = {}) => new Response(JSON.stringify(body), {
   ...init,
@@ -79,6 +80,39 @@ async function servePublishedPage(env, publicSlug) {
   return new Response(object.body, { headers: htmlHeaders });
 }
 
+async function createExport(request, env, documentId) {
+  const ownerId = userId(request);
+  if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
+
+  const version = await env.DB.prepare('SELECT v.id, v.html_object_key FROM documents d JOIN document_versions v ON v.id = d.current_version_id WHERE d.id = ? AND d.owner_id = ? AND v.safety_status = ?').bind(documentId, ownerId, 'approved').first();
+  if (!version) return json({ error: 'not_found' }, { status: 404 });
+
+  const htmlObject = await env.ASSETS.get(version.html_object_key);
+  if (!htmlObject) return json({ error: 'not_found' }, { status: 404 });
+
+  try {
+    const exportId = id();
+    const objectKey = exportObjectKey({ documentId, versionId: version.id, exportId });
+    const png = await renderHtmlToPng(env.BROWSER, await htmlObject.text());
+    await env.ASSETS.put(objectKey, png, { httpMetadata: { contentType: 'image/png' } });
+    await env.DB.prepare('INSERT INTO exports (id, owner_id, document_id, version_id, object_key) VALUES (?, ?, ?, ?, ?)').bind(exportId, ownerId, documentId, version.id, objectKey).run();
+    return json({ id: exportId, downloadUrl: `/api/exports/${exportId}` }, { status: 201 });
+  } catch (error) {
+    return json({ error: error.message === 'render_failed' ? 'render_failed' : 'render_unavailable' }, { status: 503 });
+  }
+}
+
+async function serveExport(request, env, exportId) {
+  const ownerId = userId(request);
+  if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
+
+  const record = await env.DB.prepare('SELECT object_key FROM exports WHERE id = ? AND owner_id = ?').bind(exportId, ownerId).first();
+  if (!record) return json({ error: 'not_found' }, { status: 404 });
+  const object = await env.ASSETS.get(record.object_key);
+  if (!object) return json({ error: 'not_found' }, { status: 404 });
+  return new Response(object.body, { headers: { 'content-type': 'image/png', 'content-disposition': `attachment; filename="zijian-${exportId}.png"` } });
+}
+
 async function createGenerationJob(request, env) {
   const ownerId = userId(request);
   if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
@@ -123,6 +157,12 @@ export default {
 
     const publishMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/publish$/);
     if (request.method === 'POST' && publishMatch) return publishDocument(request, env, publishMatch[1]);
+
+    const exportMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/exports$/);
+    if (request.method === 'POST' && exportMatch) return createExport(request, env, exportMatch[1]);
+
+    const downloadMatch = url.pathname.match(/^\/api\/exports\/([^/]+)$/);
+    if (request.method === 'GET' && downloadMatch) return serveExport(request, env, downloadMatch[1]);
 
     const publicMatch = url.pathname.match(/^\/p\/([a-z0-9]+)$/);
     if (request.method === 'GET' && publicMatch) return servePublishedPage(env, publicMatch[1]);
