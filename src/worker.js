@@ -1,4 +1,6 @@
 import { createSafeDocument, supportedStyles } from './safe-document.js';
+import { modelCatalog } from './models.js';
+import { reserveGenerationCredits } from './credits.js';
 
 const json = (body, init = {}) => new Response(JSON.stringify(body), {
   ...init,
@@ -77,6 +79,32 @@ async function servePublishedPage(env, publicSlug) {
   return new Response(object.body, { headers: htmlHeaders });
 }
 
+async function createGenerationJob(request, env) {
+  const ownerId = userId(request);
+  if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
+
+  const idempotencyKey = request.headers.get('idempotency-key');
+  if (!idempotencyKey) return badRequest('idempotency-key header is required');
+  const payload = await request.json().catch(() => null);
+  if (!payload || typeof payload.modelId !== 'string') return badRequest('modelId is required');
+
+  try {
+    const reservation = await reserveGenerationCredits({
+      db: env.DB,
+      ownerId,
+      documentId: typeof payload.documentId === 'string' ? payload.documentId : null,
+      modelId: payload.modelId,
+      idempotencyKey
+    });
+
+    if (reservation.state === 'insufficient_credits') return json({ error: 'insufficient_credits' }, { status: 402 });
+    return json(reservation, { status: reservation.state === 'existing' ? 200 : 201 });
+  } catch (error) {
+    if (error.message === 'unsupported_model') return badRequest('unsupported model');
+    throw error;
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -84,6 +112,12 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/health') {
       return json({ ok: true, service: 'zijian-api', environment: env.APP_ORIGIN ? 'configured' : 'unconfigured' });
     }
+
+    if (request.method === 'GET' && url.pathname === '/api/models') {
+      return json({ models: Object.entries(modelCatalog).map(([id, model]) => ({ id, label: model.label, credits: model.credits })) });
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/generation-jobs') return createGenerationJob(request, env);
 
     if (request.method === 'POST' && url.pathname === '/api/documents') return createDocument(request, env);
 
