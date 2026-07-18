@@ -93,7 +93,9 @@ test('export uses a fixed R2 key and stores Browser Run PNG output', async () =>
 
   assert.equal(exportObjectKey({ documentId: 'd1', versionId: 'v1', exportId: 'e1' }), 'documents/d1/versions/v1/exports/e1.png');
   assert.equal(stylePreviewObjectKey({ templateId: 's1' }), 'style-templates/s1/preview.png');
-  assert.equal(await new Response(await renderHtmlToPng(browser, '<h1>视觉作品</h1>')).text(), 'png-bytes');
+  const png = await renderHtmlToPng(browser, '<h1>视觉作品</h1>');
+  assert.equal(png.byteLength, 9);
+  assert.equal(await new Response(png).text(), 'png-bytes');
 });
 
 test('email identities normalize and OTP hashes do not expose the code', async () => {

@@ -16,5 +16,5 @@ export async function renderHtmlToPng(browser, html) {
   });
 
   if (!response.ok) throw new Error('render_failed');
-  return response.body;
+  return response.arrayBuffer();
 }
