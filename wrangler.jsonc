@@ -20,7 +20,7 @@
     "binding": "BROWSER"
   },
   "assets": {
-    "directory": ".",
+    "directory": "public",
     "run_worker_first": ["/api/*", "/p/*"]
   },
   "routes": [
