@@ -297,7 +297,7 @@ export default {
     }
 
     if (request.method === 'GET' && url.pathname === '/api/models') {
-      return json({ models: Object.entries(modelCatalog).map(([id, model]) => ({ id, label: model.label, credits: model.credits })) });
+      return json({ models: Object.entries(modelCatalog).map(([id, model]) => ({ id, label: model.label, modelName: model.modelName, speed: model.speed, description: model.description, credits: model.credits })) });
     }
 
     if (request.method === 'POST' && url.pathname === '/api/auth/request-code') return requestLoginCode(request, env);

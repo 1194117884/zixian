@@ -1,18 +1,27 @@
 export const modelCatalog = {
   fast: {
     label: '快速创作',
+    modelName: 'DeepSeek Flash',
+    speed: '最快',
+    description: '快速整理想法与短文，适合日常灵感。',
     provider: 'openai-compatible',
     defaultModel: 'deepseek-v4-flash',
     credits: 6
   },
   precise: {
     label: '精致排版',
+    modelName: 'GPT-5 mini',
+    speed: '均衡',
+    description: '更细致地组织结构与表达层次。',
     provider: 'openai-compatible',
     defaultModel: 'gpt-5-mini',
     credits: 15
   },
   studio: {
     label: '旗舰创作',
+    modelName: 'Claude Sonnet 4',
+    speed: '较慢',
+    description: '适合复杂内容与更完整的创作方向。',
     provider: 'anthropic-compatible',
     defaultModel: 'claude-sonnet-4',
     credits: 30

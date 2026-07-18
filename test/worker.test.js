@@ -36,7 +36,16 @@ test('safe document escapes user-provided markup and has no script execution', (
 
 test('model catalog exposes fixed credit costs', () => {
   assert.equal(getModel('fast').credits, 6);
+  assert.equal(getModel('fast').speed, '最快');
   assert.equal(getModel('missing'), null);
+});
+
+test('model API exposes capability, speed, and credit cost', async () => {
+  const response = await worker.fetch(new Request('https://example.test/api/models'), {});
+  const { models } = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(models[0], { id: 'fast', label: '快速创作', modelName: 'DeepSeek Flash', speed: '最快', description: '快速整理想法与短文，适合日常灵感。', credits: 6 });
 });
 
 test('generation job requires a signed session before billing', async () => {

@@ -16,6 +16,8 @@ let currentUser = null;
 let currentDocumentId = null;
 let authStage = 'request';
 let resendTimer = null;
+let selectedModelId = 'fast';
+let availableModels = [];
 
 function escapeHtml(value) {
   return value.replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
@@ -49,6 +51,25 @@ function showToast(message) {
   toast.classList.add('show');
   clearTimeout(showToast.timer);
   showToast.timer = setTimeout(() => toast.classList.remove('show'), 2400);
+}
+
+function updateGenerateButton() {
+  const model = availableModels.find(item => item.id === selectedModelId);
+  document.querySelector('#generate').innerHTML = `生成作品 <span>✦ ${model?.credits ?? 6}</span>`;
+}
+
+function renderModelOptions(models) {
+  const container = document.querySelector('#model-options');
+  if (!models.length) { container.innerHTML = '<span class="model-loading">模型暂不可用，请刷新重试。</span>'; return; }
+  availableModels = models;
+  if (!models.some(model => model.id === selectedModelId)) selectedModelId = models[0].id;
+  container.innerHTML = models.map(model => `<button class="model-option${model.id === selectedModelId ? ' selected' : ''}" type="button" data-model-id="${escapeHtml(model.id)}"><span class="model-option-top"><b>${escapeHtml(model.label)}</b><small>${escapeHtml(model.speed)}</small></span><span class="model-name">${escapeHtml(model.modelName)}</span><span class="model-description">${escapeHtml(model.description)}</span><span class="model-credits">✦ ${model.credits} 积分</span></button>`).join('');
+  updateGenerateButton();
+}
+
+async function loadModels() {
+  const response = await api('/api/models');
+  renderModelOptions(response.models);
 }
 
 function updateProfile(user) {
@@ -156,7 +177,7 @@ document.querySelector('#generate').addEventListener('click', async () => {
     const result = await api('/api/generation-jobs', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
-      body: JSON.stringify({ modelId: 'fast', title: content.value.trim().split(/\n/)[0], content: content.value, instruction: instruction.value, style: selectedStyle })
+      body: JSON.stringify({ modelId: selectedModelId, title: content.value.trim().split(/\n/)[0], content: content.value, instruction: instruction.value, style: selectedStyle })
     });
     content.value = [result.composition.title, ...result.composition.paragraphs, result.composition.highlight].join('\n\n');
     count.textContent = content.value.length;
@@ -168,8 +189,14 @@ document.querySelector('#generate').addEventListener('click', async () => {
     showToast(error.code === 'insufficient_credits' ? '积分不足，请先充值' : '生成失败，积分已退回');
   } finally {
     button.disabled = false;
-    button.innerHTML = '生成作品 <span>✦ 6</span>';
+    updateGenerateButton();
   }
+});
+document.querySelector('#model-options').addEventListener('click', event => {
+  const option = event.target.closest('.model-option');
+  if (!option) return;
+  selectedModelId = option.dataset.modelId;
+  renderModelOptions(availableModels);
 });
 document.querySelector('#clear-instruction').addEventListener('click', () => { instruction.value = ''; instruction.focus(); });
 document.querySelector('#share').addEventListener('click', async () => {
@@ -294,4 +321,5 @@ document.querySelector('#resend-code').addEventListener('click', async event => 
 document.addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') document.querySelector('#generate').click(); });
 
 api('/api/auth/me').then(async result => { updateProfile(result.user); await loadWallet(); }).catch(() => updateProfile(null));
+loadModels().catch(() => renderModelOptions([]));
 renderDocument();
