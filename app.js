@@ -63,12 +63,12 @@ function renderModelOptions(models) {
   if (!models.length) { container.innerHTML = '<span class="model-loading">模型暂不可用，请刷新重试。</span>'; return; }
   availableModels = models;
   if (!models.some(model => model.id === selectedModelId)) selectedModelId = models[0].id;
-  container.innerHTML = models.map(model => `<button class="model-option${model.id === selectedModelId ? ' selected' : ''}" type="button" data-model-id="${escapeHtml(model.id)}"><span class="model-option-top"><b>${escapeHtml(model.label)}</b><small>${escapeHtml(model.speed)}</small></span><span class="model-name">${escapeHtml(model.modelName)}</span><span class="model-description">${escapeHtml(model.description)}</span><span class="model-credits">✦ ${model.credits} 积分</span></button>`).join('');
+  container.innerHTML = models.map(model => `<button class="model-option${model.id === selectedModelId ? ' selected' : ''}" type="button" data-model-id="${escapeHtml(model.id)}"><span class="model-option-top"><b>${escapeHtml(model.label)}</b><small>${escapeHtml(model.speed || '—')}</small></span><span class="model-name">${escapeHtml(model.modelName || model.label)}</span><span class="model-description">${escapeHtml(model.description || '按所选设计语言整理内容。')}</span><span class="model-credits">✦ ${model.credits} 积分</span></button>`).join('');
   updateGenerateButton();
 }
 
 async function loadModels() {
-  const response = await api('/api/models');
+  const response = await api(`/api/models?fresh=${Date.now()}`);
   renderModelOptions(response.models);
 }
 
