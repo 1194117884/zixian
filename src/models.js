@@ -32,15 +32,32 @@ export function getModel(modelId) {
   return modelCatalog[modelId] ?? null;
 }
 
-export function createCompositionPrompt({ title, content, instruction, style }) {
+export const visualTones = ['original', 'vivid', 'night', 'warm', 'cool'];
+
+export const systemPrompt = [
+  'You are ZiXian, an exacting visual editor for shareable static documents.',
+  'Return valid JSON only. Never return HTML, CSS, Markdown, links, scripts, or commentary.',
+  'The JSON schema is: {"title": string, "paragraphs": string[], "highlight": string, "visualTone": "original"|"vivid"|"night"|"warm"|"cool"}.',
+  'When the creator gives a revision direction, you MUST apply it visibly. Preserve the core idea unless they ask to rewrite it.',
+  'Map visual directions such as colorful, cyberpunk, neon, vivid, warm, dark, or cool to the closest visualTone. Do not ignore visual directions.',
+  'Keep paragraphs to six or fewer and make the highlight distinct from the body.'
+].join(' ');
+
+function conversationMessages(history) {
+  if (!Array.isArray(history)) return [];
+  return history
+    .filter(message => message && (message.role === 'user' || message.role === 'assistant') && typeof message.content === 'string')
+    .slice(-8)
+    .map(message => ({ role: message.role, content: message.content.slice(0, 2400) }));
+}
+
+export function createCompositionPrompt({ title, content, instruction, style, revision = false }) {
   return [
-    'You create structured copy for a visual sharing document.',
-    'Return JSON only with title, paragraphs (string array, max 6), and highlight.',
-    'Do not return HTML, Markdown, links, scripts, or commentary.',
     `Style identifier: ${style}.`,
+    `This is a ${revision ? 'revision of the current document' : 'first draft'}.`,
     `Title: ${title || 'Untitled'}.`,
-    `Content: ${content}.`,
-    `Creator direction: ${instruction || 'None'}.`
+    `Current document content: ${content}.`,
+    `Creator direction: ${instruction || 'Create the strongest first draft.'}`
   ].join('\n');
 }
 
@@ -56,7 +73,8 @@ export function parseComposition(value) {
   return {
     title: parsed.title.trim().slice(0, 120),
     paragraphs: paragraphs.map(paragraph => paragraph.trim().slice(0, 2000)),
-    highlight: parsed.highlight.trim().slice(0, 500)
+    highlight: parsed.highlight.trim().slice(0, 500),
+    visualTone: visualTones.includes(parsed.visualTone) ? parsed.visualTone : 'original'
   };
 }
 
@@ -74,20 +92,21 @@ function providerConfig(model, env) {
   throw new Error('unsupported_provider');
 }
 
-export async function generateComposition({ modelId, title, content, instruction, style, env, fetcher = fetch }) {
+export async function generateComposition({ modelId, title, content, instruction, style, history, revision = false, env, fetcher = fetch }) {
   const model = getModel(modelId);
   if (!model) throw new Error('unsupported_model');
   const config = providerConfig(model, env);
   if (!config.key) throw new Error('model_unavailable');
-  const prompt = createCompositionPrompt({ title, content, instruction, style });
+  const prompt = createCompositionPrompt({ title, content, instruction, style, revision });
+  const messages = [...conversationMessages(history), { role: 'user', content: prompt }];
   const request = model.provider === 'anthropic-compatible'
     ? {
         headers: { 'content-type': 'application/json', 'x-api-key': config.key, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: model.defaultModel, max_tokens: 1400, messages: [{ role: 'user', content: prompt }] })
+        body: JSON.stringify({ model: model.defaultModel, max_tokens: 1400, system: systemPrompt, messages })
       }
     : {
         headers: { 'content-type': 'application/json', authorization: `Bearer ${config.key}` },
-        body: JSON.stringify({ model: model.defaultModel, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: 'Return valid JSON only.' }, { role: 'user', content: prompt }] })
+        body: JSON.stringify({ model: model.defaultModel, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: systemPrompt }, ...messages] })
       };
   const response = await fetcher(config.url, { method: 'POST', ...request });
   if (!response.ok) throw new Error('model_unavailable');

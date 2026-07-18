@@ -39,13 +39,13 @@ async function createDocumentForOwner({ ownerId, payload, env }) {
   const versionId = id();
   const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim().slice(0, 120) : '未命名作品';
   const objectKey = `documents/${documentId}/versions/${versionId}/safe.html`;
-  const html = createSafeDocument({ title, content: payload.content, style: payload.style });
+  const html = createSafeDocument({ title, content: payload.content, style: payload.style, visualTone: payload.visualTone });
 
   await env.ASSETS.put(objectKey, html, { httpMetadata: { contentType: 'text/html; charset=utf-8' } });
   await env.DB.batch([
     env.DB.prepare('INSERT OR IGNORE INTO users (id) VALUES (?)').bind(ownerId),
     env.DB.prepare('INSERT INTO documents (id, owner_id, title, current_version_id) VALUES (?, ?, ?, ?)').bind(documentId, ownerId, title, versionId),
-    env.DB.prepare('INSERT INTO document_versions (id, document_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?)').bind(versionId, documentId, JSON.stringify({ content: payload.content, style: payload.style }), objectKey, 'approved')
+    env.DB.prepare('INSERT INTO document_versions (id, document_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?)').bind(versionId, documentId, JSON.stringify({ content: payload.content, style: payload.style, visualTone: payload.visualTone || 'original' }), objectKey, 'approved')
   ]);
 
   return { id: documentId, versionId, title, status: 'draft' };
@@ -55,11 +55,11 @@ async function createDocumentVersionForOwner({ ownerId, document, payload, env }
   const versionId = id();
   const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim().slice(0, 120) : document.title;
   const objectKey = `documents/${document.id}/versions/${versionId}/safe.html`;
-  const html = createSafeDocument({ title, content: payload.content, style: payload.style });
+  const html = createSafeDocument({ title, content: payload.content, style: payload.style, visualTone: payload.visualTone });
 
   await env.ASSETS.put(objectKey, html, { httpMetadata: { contentType: 'text/html; charset=utf-8' } });
   await env.DB.batch([
-    env.DB.prepare('INSERT INTO document_versions (id, document_id, parent_version_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?, ?)').bind(versionId, document.id, document.current_version_id, JSON.stringify({ content: payload.content, style: payload.style }), objectKey, 'approved'),
+    env.DB.prepare('INSERT INTO document_versions (id, document_id, parent_version_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?, ?)').bind(versionId, document.id, document.current_version_id, JSON.stringify({ content: payload.content, style: payload.style, visualTone: payload.visualTone || 'original' }), objectKey, 'approved'),
     env.DB.prepare('UPDATE documents SET title = ?, current_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?').bind(title, versionId, document.id, ownerId)
   ]);
 
@@ -234,12 +234,14 @@ async function createGenerationJob(request, env) {
         content: payload.content,
         instruction: payload.instruction,
         style: payload.style,
+        history: payload.history,
+        revision: Boolean(existingDocument),
         env
       });
       const generatedContent = [...composition.paragraphs, composition.highlight].join('\n\n');
       const document = existingDocument
-        ? await createDocumentVersionForOwner({ ownerId, document: existingDocument, payload: { title: composition.title, content: generatedContent, style: payload.style }, env })
-        : await createDocumentForOwner({ ownerId, payload: { title: composition.title, content: generatedContent, style: payload.style }, env });
+        ? await createDocumentVersionForOwner({ ownerId, document: existingDocument, payload: { title: composition.title, content: generatedContent, style: payload.style, visualTone: composition.visualTone }, env })
+        : await createDocumentForOwner({ ownerId, payload: { title: composition.title, content: generatedContent, style: payload.style, visualTone: composition.visualTone }, env });
       await env.DB.prepare("UPDATE generation_jobs SET document_id = ?, status = 'succeeded', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?").bind(document.id, reservation.job.id, ownerId).run();
       return json({ job: { ...reservation.job, status: 'succeeded' }, document, composition }, { status: 201 });
     } catch (error) {

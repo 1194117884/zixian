@@ -5,6 +5,14 @@ const themes = {
   social: { background: '#c6d9cc', foreground: '#16362b', accent: '#f4ec75', label: 'IDEA CARD' }
 };
 
+const toneOverrides = {
+  original: {},
+  vivid: { background: '#3b146f', foreground: '#fff8ff', accent: '#58f4dc', label: 'VIVID / ZIXIAN' },
+  night: { background: '#13162a', foreground: '#eff2ff', accent: '#8c9eff', label: 'NIGHT / ZIXIAN' },
+  warm: { background: '#f7d9bc', foreground: '#48251e', accent: '#ef6a4a', label: 'WARM / ZIXIAN' },
+  cool: { background: '#cfe5ef', foreground: '#173847', accent: '#247c9d', label: 'COOL / ZIXIAN' }
+};
+
 export const supportedStyles = Object.keys(themes);
 
 export function escapeHtml(value) {
@@ -13,9 +21,10 @@ export function escapeHtml(value) {
   })[character]);
 }
 
-export function createSafeDocument({ title, content, style }) {
-  const theme = themes[style];
-  if (!theme) throw new Error('unsupported_style');
+export function createSafeDocument({ title, content, style, visualTone = 'original' }) {
+  const baseTheme = themes[style];
+  if (!baseTheme) throw new Error('unsupported_style');
+  const theme = { ...baseTheme, ...(toneOverrides[visualTone] || toneOverrides.original) };
 
   const paragraphs = content.trim().split(/\n\s*\n/).filter(Boolean);
   const heading = escapeHtml(title.trim() || paragraphs.shift() || '未命名作品');

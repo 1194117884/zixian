@@ -17,6 +17,8 @@ let selectedModelId = 'fast';
 let availableModels = [];
 let hasGenerated = false;
 let versionCount = 0;
+let selectedTone = 'original';
+let conversationHistory = [];
 
 function escapeHtml(value) {
   return value.replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
@@ -40,7 +42,14 @@ function renderDocument() {
     magazine: { bg:'#f5f2eb', ink:'#1c1b19', font:'Georgia, serif', top:'JIAN  /  04', accent:'#1c1b19' },
     social: { bg:'#c6d9cc', ink:'#16362b', font:'Arial, sans-serif', top:'IDEA CARD', accent:'#f4ec75' }
   };
-  const t = themes[selectedStyle];
+  const tones = {
+    original: {},
+    vivid: { bg:'#3b146f', ink:'#fff8ff', top:'VIVID / ZIXIAN', accent:'#58f4dc' },
+    night: { bg:'#13162a', ink:'#eff2ff', top:'NIGHT / ZIXIAN', accent:'#8c9eff' },
+    warm: { bg:'#f7d9bc', ink:'#48251e', top:'WARM / ZIXIAN', accent:'#ef6a4a' },
+    cool: { bg:'#cfe5ef', ink:'#173847', top:'COOL / ZIXIAN', accent:'#247c9d' }
+  };
+  const t = { ...themes[selectedStyle], ...tones[selectedTone] };
   const paragraphs = body.map((block, index) => `<p class="body ${index === 0 ? 'first' : ''}">${block}</p>`).join('');
   preview.srcdoc = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>*{box-sizing:border-box}body{margin:0;padding:38px 31px;min-height:100vh;background:${t.bg};color:${t.ink};font-family:${t.font};display:flex;flex-direction:column}.top{font:600 9px Arial;letter-spacing:.18em;opacity:.68;border-bottom:1px solid currentColor;padding-bottom:14px}.number{font:10px Arial;letter-spacing:.1em;margin-top:30px;opacity:.65}.title{font-size:${selectedStyle === 'board' ? '29' : '25'}px;line-height:1.24;letter-spacing:-.06em;margin:9px 0 20px;font-weight:800}.body{font-size:13px;line-height:1.85;margin:0 0 15px}.first:first-letter{font-size:1.35em;font-weight:bold}.highlight{margin-top:auto;padding:14px 14px 15px;border-left:4px solid ${t.accent};background:rgba(255,255,255,.34);font-size:15px;line-height:1.55;font-weight:700;letter-spacing:-.03em}.foot{font:9px Arial;letter-spacing:.12em;opacity:.55;margin-top:25px}.line{width:33px;height:3px;background:${t.accent};margin:3px 0 20px}</style></head><body><div class="top">${t.top}</div><div class="number">01 — 想法记录</div><h1 class="title">${title}</h1><div class="line"></div>${paragraphs}<div class="highlight">${highlight}</div><div class="foot">ZIXIAN / VISUAL NOTE</div></body></html>`;
 }
@@ -81,6 +90,8 @@ function showGeneratedDocument() {
 function resetCreation() {
   hasGenerated = false;
   versionCount = 0;
+  selectedTone = 'original';
+  conversationHistory = [];
   currentDocumentId = null;
   document.querySelector('#source-content').hidden = false;
   document.querySelector('#conversation').replaceChildren();
@@ -223,16 +234,18 @@ document.querySelector('#generate').addEventListener('click', async () => {
     const result = await api('/api/generation-jobs', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
-      body: JSON.stringify({ modelId: selectedModelId, documentId: currentDocumentId || undefined, title: content.value.trim().split(/\n/)[0], content: content.value, instruction: instruction.value, style: selectedStyle })
+      body: JSON.stringify({ modelId: selectedModelId, documentId: currentDocumentId || undefined, title: content.value.trim().split(/\n/)[0], content: content.value, instruction: instruction.value, style: selectedStyle, history: [...conversationHistory, { role: 'user', content: direction || '请生成第一版视觉作品。' }] })
     });
     content.value = [result.composition.title, ...result.composition.paragraphs, result.composition.highlight].join('\n\n');
     count.textContent = content.value.length;
     currentDocumentId = result.document.id;
+    selectedTone = result.composition.visualTone || 'original';
     renderDocument();
     showGeneratedDocument();
     if (initialGeneration) addConversationMessage('user', direction || '请将这段内容制作为可分享的视觉作品。');
     const responseMessage = addConversationMessage('assistant', `第 ${versionCount} 版已完成。你可以继续告诉我想调整的内容。`);
     addPreviewToMessage(responseMessage);
+    conversationHistory.push({ role: 'user', content: direction || '请生成第一版视觉作品。' }, { role: 'assistant', content: JSON.stringify(result.composition) });
     instruction.value = '';
     await loadWallet();
     showToast('作品已生成并安全保存');

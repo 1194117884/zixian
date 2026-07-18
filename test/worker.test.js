@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import worker from '../src/worker.js';
 import { createSafeDocument } from '../src/safe-document.js';
-import { createCompositionPrompt, generateComposition, getModel, parseComposition } from '../src/models.js';
+import { createCompositionPrompt, generateComposition, getModel, parseComposition, systemPrompt } from '../src/models.js';
 import { exportObjectKey, renderHtmlToPng } from '../src/export.js';
 import { hashSecret, normalizeEmail, validEmail } from '../src/auth.js';
 import { grantTestCredits } from '../src/payments.js';
@@ -32,6 +32,7 @@ test('safe document escapes user-provided markup and has no script execution', (
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.doesNotMatch(html, /<script>/);
+  assert.match(createSafeDocument({ title: '标题', content: '正文', style: 'note', visualTone: 'vivid' }), /#3b146f/);
 });
 
 test('model catalog exposes fixed credit costs', () => {
@@ -60,24 +61,26 @@ test('model composition only accepts a bounded structured response', () => {
   const prompt = createCompositionPrompt({ title: '标题', content: '内容', instruction: '', style: 'note' });
   const composition = parseComposition('{"title":"标题","paragraphs":["第一段","第二段"],"highlight":"重点"}');
 
-  assert.match(prompt, /Return JSON only/);
-  assert.deepEqual(composition, { title: '标题', paragraphs: ['第一段', '第二段'], highlight: '重点' });
+  assert.match(prompt, /first draft/);
+  assert.deepEqual(composition, { title: '标题', paragraphs: ['第一段', '第二段'], highlight: '重点', visualTone: 'original' });
   assert.throws(() => parseComposition('{"title":"x"}'), /invalid_model_output/);
 });
 
 test('model adapter requests constrained JSON and never accepts HTML output directly', async () => {
   let request;
   const composition = await generateComposition({
-    modelId: 'fast', title: '标题', content: '内容', instruction: '', style: 'note', env: { DEEPSEEK_API_KEY: 'key' },
+    modelId: 'fast', title: '标题', content: '内容', instruction: '改成炫彩赛博朋克', style: 'note', history: [{ role: 'user', content: '先做第一版' }], revision: true, env: { DEEPSEEK_API_KEY: 'key' },
     fetcher: async (url, options) => {
       request = { url, options };
-      return new Response(JSON.stringify({ choices: [{ message: { content: '{"title":"标题","paragraphs":["正文"],"highlight":"重点"}' } }] }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"title":"标题","paragraphs":["正文"],"highlight":"重点","visualTone":"vivid"}' } }] }), { status: 200 });
     }
   });
 
   assert.match(request.url, /deepseek/);
   assert.deepEqual(JSON.parse(request.options.body).response_format, { type: 'json_object' });
-  assert.deepEqual(composition, { title: '标题', paragraphs: ['正文'], highlight: '重点' });
+  assert.equal(JSON.parse(request.options.body).messages[0].content, systemPrompt);
+  assert.equal(JSON.parse(request.options.body).messages[1].content, '先做第一版');
+  assert.deepEqual(composition, { title: '标题', paragraphs: ['正文'], highlight: '重点', visualTone: 'vivid' });
 });
 
 test('export uses a fixed R2 key and stores Browser Run PNG output', async () => {
