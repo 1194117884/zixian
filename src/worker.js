@@ -179,6 +179,7 @@ async function publishStyleTemplate(request, env, documentId) {
       const png = await renderHtmlToPng(env.BROWSER, await sourceObject.text());
       await env.ASSETS.put(previewObjectKey, png, { httpMetadata: { contentType: 'image/png' } });
     } catch (error) {
+      console.error('style preview render failed', error);
       return json({ error: error.message === 'render_failed' ? 'render_failed' : 'render_unavailable' }, { status: 503 });
     }
   }
@@ -265,6 +266,7 @@ async function createExport(request, env, documentId) {
     await env.DB.prepare('INSERT INTO exports (id, owner_id, document_id, version_id, object_key) VALUES (?, ?, ?, ?, ?)').bind(exportId, ownerId, documentId, version.id, objectKey).run();
     return json({ id: exportId, downloadUrl: `/api/exports/${exportId}` }, { status: 201 });
   } catch (error) {
+    console.error('document export render failed', error);
     return json({ error: error.message === 'render_failed' ? 'render_failed' : 'render_unavailable' }, { status: 503 });
   }
 }

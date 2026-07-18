@@ -10,8 +10,7 @@ export async function renderHtmlToPng(browser, html) {
   const response = await browser.quickAction('screenshot', {
     html,
     screenshotOptions: {
-      fullPage: true,
-      type: 'png'
+      fullPage: true
     },
     viewport: { width: 1080, height: 1440, deviceScaleFactor: 1 }
   });
