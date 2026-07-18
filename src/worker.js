@@ -79,11 +79,13 @@ async function createDocument(request, env) {
 async function publishDocument(request, env, documentId) {
   const ownerId = await sessionUserId(request, env);
   if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
+  const payload = await request.json().catch(() => ({}));
 
   const document = await env.DB.prepare('SELECT id, current_version_id FROM documents WHERE id = ? AND owner_id = ?').bind(documentId, ownerId).first();
   if (!document) return json({ error: 'not_found' }, { status: 404 });
 
-  const version = await env.DB.prepare('SELECT id, safety_status FROM document_versions WHERE id = ? AND document_id = ?').bind(document.current_version_id, document.id).first();
+  const versionId = typeof payload?.versionId === 'string' ? payload.versionId : document.current_version_id;
+  const version = await env.DB.prepare('SELECT id, safety_status FROM document_versions WHERE id = ? AND document_id = ?').bind(versionId, document.id).first();
   if (!version || version.safety_status !== 'approved') return json({ error: 'not_publishable' }, { status: 409 });
 
   const publicSlug = slug();
@@ -111,12 +113,12 @@ async function servePublishedPage(env, publicSlug) {
 async function publishStyleTemplate(request, env, documentId) {
   const ownerId = await sessionUserId(request, env);
   if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
+  const payload = await request.json().catch(() => ({}));
   const document = await env.DB.prepare('SELECT id, title, current_version_id FROM documents WHERE id = ? AND owner_id = ?').bind(documentId, ownerId).first();
   if (!document) return json({ error: 'not_found' }, { status: 404 });
-  const version = await env.DB.prepare('SELECT id, content_json, safety_status FROM document_versions WHERE id = ? AND document_id = ?').bind(document.current_version_id, document.id).first();
+  const versionId = typeof payload?.versionId === 'string' ? payload.versionId : document.current_version_id;
+  const version = await env.DB.prepare('SELECT id, content_json, safety_status FROM document_versions WHERE id = ? AND document_id = ?').bind(versionId, document.id).first();
   if (!version || version.safety_status !== 'approved') return json({ error: 'not_publishable' }, { status: 409 });
-  const content = JSON.parse(version.content_json);
-  const payload = await request.json().catch(() => null);
   const template = styleTemplatePayload(payload, document.title);
   const templateId = id();
   try {
@@ -173,8 +175,12 @@ async function useStyleTemplate(request, env, templateId) {
 async function createExport(request, env, documentId) {
   const ownerId = await sessionUserId(request, env);
   if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
+  const payload = await request.json().catch(() => ({}));
 
-  const version = await env.DB.prepare('SELECT v.id, v.html_object_key FROM documents d JOIN document_versions v ON v.id = d.current_version_id WHERE d.id = ? AND d.owner_id = ? AND v.safety_status = ?').bind(documentId, ownerId, 'approved').first();
+  const document = await env.DB.prepare('SELECT id, current_version_id FROM documents WHERE id = ? AND owner_id = ?').bind(documentId, ownerId).first();
+  if (!document) return json({ error: 'not_found' }, { status: 404 });
+  const versionId = typeof payload?.versionId === 'string' ? payload.versionId : document.current_version_id;
+  const version = await env.DB.prepare('SELECT id, html_object_key FROM document_versions WHERE id = ? AND document_id = ? AND safety_status = ?').bind(versionId, document.id, 'approved').first();
   if (!version) return json({ error: 'not_found' }, { status: 404 });
 
   const htmlObject = await env.ASSETS.get(version.html_object_key);

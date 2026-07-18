@@ -53,7 +53,7 @@ function addConversationMessage(role, text) {
   return message;
 }
 
-function addPreviewToMessage(message) {
+function addPreviewToMessage(message, documentVersion) {
   const bubble = document.createElement('div');
   bubble.className = 'document-bubble';
   const iframe = document.createElement('iframe');
@@ -62,6 +62,13 @@ function addPreviewToMessage(message) {
   iframe.srcdoc = preview.srcdoc;
   bubble.append(iframe);
   message.append(bubble);
+
+  const actions = document.createElement('div');
+  actions.className = 'output-actions';
+  actions.dataset.documentId = documentVersion.id;
+  actions.dataset.versionId = documentVersion.versionId;
+  actions.innerHTML = '<button type="button" data-output-action="share">分享</button><button type="button" data-output-action="export">生成高清图</button><button type="button" data-output-action="style">发布为风格</button>';
+  message.append(actions);
 }
 
 function showGeneratedDocument() {
@@ -225,7 +232,7 @@ document.querySelector('#generate').addEventListener('click', async () => {
     showGeneratedDocument();
     if (initialGeneration) addConversationMessage('user', direction || '请将这段内容制作为可分享的视觉作品。');
     const responseMessage = addConversationMessage('assistant', `第 ${versionCount} 版已完成。你可以继续告诉我想调整的内容。`);
-    addPreviewToMessage(responseMessage);
+    addPreviewToMessage(responseMessage, result.document);
     conversationHistory.push({ role: 'user', content: direction || '请生成第一版视觉作品。' }, { role: 'assistant', content: JSON.stringify(result.composition) });
     instruction.value = '';
     await loadWallet();
@@ -244,32 +251,33 @@ document.querySelector('#model-options').addEventListener('click', event => {
   renderModelOptions(availableModels);
 });
 document.querySelector('#clear-instruction').addEventListener('click', () => { instruction.value = ''; instruction.focus(); });
-document.querySelector('#share').addEventListener('click', async () => {
+document.querySelector('#conversation').addEventListener('click', async event => {
+  const button = event.target.closest('[data-output-action]');
+  if (!button) return;
+  const actions = button.closest('.output-actions');
+  const { documentId, versionId } = actions.dataset;
+  button.disabled = true;
   try {
-    if (!currentDocumentId) await saveDocument();
-    if (!currentDocumentId) return;
-    const page = await api(`/api/documents/${currentDocumentId}/publish`, { method: 'POST' });
-    document.querySelector('.share-url code').textContent = page.url;
-    document.querySelector('#share-dialog').showModal();
-  } catch { showToast('发布失败，请稍后重试'); }
-});
-document.querySelector('#export').addEventListener('click', async () => {
-  try {
-    if (!currentDocumentId) await saveDocument();
-    if (!currentDocumentId) return;
-    showToast('正在生成高清图…');
-    const output = await api(`/api/documents/${currentDocumentId}/exports`, { method: 'POST' });
-    window.location.assign(output.downloadUrl);
-  } catch { showToast('导出暂不可用，请稍后重试'); }
-});
-document.querySelector('#publish-style').addEventListener('click', async () => {
-  try {
-    if (!await requireLogin()) return;
-    if (!currentDocumentId) await saveDocument();
-    if (!currentDocumentId) return;
-    await api(`/api/documents/${currentDocumentId}/styles`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description: instruction.value }) });
-    showToast('已发布到风格库');
-  } catch (error) { showToast(error.code === 'already_published' ? '这份作品已经发布为风格' : '风格发布失败，请稍后重试'); }
+    if (button.dataset.outputAction === 'share') {
+      const page = await api(`/api/documents/${documentId}/publish`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ versionId }) });
+      document.querySelector('.share-url code').textContent = page.url;
+      document.querySelector('#share-dialog').showModal();
+    }
+    if (button.dataset.outputAction === 'export') {
+      showToast('正在生成高清图…');
+      const output = await api(`/api/documents/${documentId}/exports`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ versionId }) });
+      window.location.assign(output.downloadUrl);
+    }
+    if (button.dataset.outputAction === 'style') {
+      await api(`/api/documents/${documentId}/styles`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ versionId }) });
+      showToast('已发布到风格库');
+    }
+  } catch (error) {
+    const message = button.dataset.outputAction === 'share' ? '发布失败，请稍后重试' : button.dataset.outputAction === 'export' ? '导出暂不可用，请稍后重试' : error.code === 'already_published' ? '这份作品已经发布为风格' : '风格发布失败，请稍后重试';
+    showToast(message);
+  } finally {
+    button.disabled = false;
+  }
 });
 document.querySelectorAll('.open-style-library').forEach(button => button.addEventListener('click', async event => {
   event.preventDefault();
