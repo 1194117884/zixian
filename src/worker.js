@@ -28,6 +28,12 @@ function validDocumentPayload(payload) {
   return payload && typeof payload.content === 'string' && payload.content.trim() && payload.content.length <= 10000 && supportedStyles.includes(payload.style);
 }
 
+function styleTemplatePayload(payload, fallbackTitle) {
+  const title = typeof payload?.title === 'string' && payload.title.trim() ? payload.title.trim().slice(0, 80) : fallbackTitle;
+  const description = typeof payload?.description === 'string' ? payload.description.trim().slice(0, 240) : '';
+  return { title, description };
+}
+
 async function createDocumentForOwner({ ownerId, payload, env }) {
   const documentId = id();
   const versionId = id();
@@ -83,6 +89,68 @@ async function servePublishedPage(env, publicSlug) {
   const object = await env.ASSETS.get(version.html_object_key);
   if (!object) return new Response('Not found', { status: 404 });
   return new Response(object.body, { headers: htmlHeaders });
+}
+
+async function publishStyleTemplate(request, env, documentId) {
+  const ownerId = await sessionUserId(request, env);
+  if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
+  const document = await env.DB.prepare('SELECT id, title, current_version_id FROM documents WHERE id = ? AND owner_id = ?').bind(documentId, ownerId).first();
+  if (!document) return json({ error: 'not_found' }, { status: 404 });
+  const version = await env.DB.prepare('SELECT id, content_json, safety_status FROM document_versions WHERE id = ? AND document_id = ?').bind(document.current_version_id, document.id).first();
+  if (!version || version.safety_status !== 'approved') return json({ error: 'not_publishable' }, { status: 409 });
+  const content = JSON.parse(version.content_json);
+  if (!supportedStyles.includes(content.style)) return json({ error: 'not_publishable' }, { status: 409 });
+  const payload = await request.json().catch(() => null);
+  const template = styleTemplatePayload(payload, document.title);
+  const templateId = id();
+  try {
+    await env.DB.prepare('INSERT INTO style_templates (id, owner_id, source_document_id, source_version_id, title, description, style_key) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(templateId, ownerId, document.id, version.id, template.title, template.description, content.style).run();
+  } catch {
+    return json({ error: 'already_published' }, { status: 409 });
+  }
+  return json({ id: templateId, ...template, style: content.style, likes: 0, uses: 0 }, { status: 201 });
+}
+
+async function listStyleTemplates(request, env) {
+  const url = new URL(request.url);
+  const query = (url.searchParams.get('q') || '').trim().slice(0, 80);
+  const viewerId = await sessionUserId(request, env);
+  const filter = query ? 'WHERE t.title LIKE ? OR t.description LIKE ?' : '';
+  const params = query ? [viewerId || '', `%${query}%`, `%${query}%`] : [viewerId || ''];
+  const result = await env.DB.prepare(`SELECT t.id, t.title, t.description, t.style_key AS style, t.likes_count AS likes, t.uses_count AS uses, t.created_at, u.email AS author, EXISTS(SELECT 1 FROM style_template_likes l WHERE l.template_id = t.id AND l.user_id = ?) AS liked FROM style_templates t LEFT JOIN users u ON u.id = t.owner_id ${filter} ORDER BY t.uses_count DESC, t.likes_count DESC, t.created_at DESC LIMIT 50`).bind(...params).all();
+  return json({ styles: result.results || [] });
+}
+
+async function toggleStyleLike(request, env, templateId) {
+  const userId = await sessionUserId(request, env);
+  if (!userId) return json({ error: 'unauthorized' }, { status: 401 });
+  const template = await env.DB.prepare('SELECT id FROM style_templates WHERE id = ?').bind(templateId).first();
+  if (!template) return json({ error: 'not_found' }, { status: 404 });
+  const existing = await env.DB.prepare('SELECT 1 FROM style_template_likes WHERE template_id = ? AND user_id = ?').bind(templateId, userId).first();
+  if (existing) {
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM style_template_likes WHERE template_id = ? AND user_id = ?').bind(templateId, userId),
+      env.DB.prepare('UPDATE style_templates SET likes_count = MAX(0, likes_count - 1) WHERE id = ?').bind(templateId)
+    ]);
+  } else {
+    await env.DB.batch([
+      env.DB.prepare('INSERT INTO style_template_likes (template_id, user_id) VALUES (?, ?)').bind(templateId, userId),
+      env.DB.prepare('UPDATE style_templates SET likes_count = likes_count + 1 WHERE id = ?').bind(templateId)
+    ]);
+  }
+  const updated = await env.DB.prepare('SELECT likes_count AS likes FROM style_templates WHERE id = ?').bind(templateId).first();
+  return json({ liked: !existing, likes: updated.likes });
+}
+
+async function useStyleTemplate(request, env, templateId) {
+  const userId = await sessionUserId(request, env);
+  if (!userId) return json({ error: 'unauthorized' }, { status: 401 });
+  const template = await env.DB.prepare('SELECT id, title, description, style_key AS style, uses_count AS uses FROM style_templates WHERE id = ?').bind(templateId).first();
+  if (!template) return json({ error: 'not_found' }, { status: 404 });
+  const usage = await env.DB.prepare('INSERT OR IGNORE INTO style_template_uses (template_id, user_id) VALUES (?, ?)').bind(templateId, userId).run();
+  if (usage.meta.changes) await env.DB.prepare('UPDATE style_templates SET uses_count = uses_count + 1 WHERE id = ?').bind(templateId).run();
+  const updated = await env.DB.prepare('SELECT uses_count AS uses FROM style_templates WHERE id = ?').bind(templateId).first();
+  return json({ style: { ...template, uses: updated.uses }, firstUse: Boolean(usage.meta.changes) });
 }
 
 async function createExport(request, env, documentId) {
@@ -251,6 +319,17 @@ export default {
 
     const publishMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/publish$/);
     if (request.method === 'POST' && publishMatch) return publishDocument(request, env, publishMatch[1]);
+
+    const publishStyleMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/styles$/);
+    if (request.method === 'POST' && publishStyleMatch) return publishStyleTemplate(request, env, publishStyleMatch[1]);
+
+    if (request.method === 'GET' && url.pathname === '/api/styles') return listStyleTemplates(request, env);
+
+    const likeStyleMatch = url.pathname.match(/^\/api\/styles\/([^/]+)\/like$/);
+    if (request.method === 'POST' && likeStyleMatch) return toggleStyleLike(request, env, likeStyleMatch[1]);
+
+    const useStyleMatch = url.pathname.match(/^\/api\/styles\/([^/]+)\/use$/);
+    if (request.method === 'POST' && useStyleMatch) return useStyleTemplate(request, env, useStyleMatch[1]);
 
     const exportMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/exports$/);
     if (request.method === 'POST' && exportMatch) return createExport(request, env, exportMatch[1]);
