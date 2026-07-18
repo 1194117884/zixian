@@ -11,6 +11,7 @@ let selectedStyleTemplateId = null;
 let selectedDesign = { background:'#fffefb', foreground:'#1d1d1b', accent:'#1d1d1b', label:'ZIXIAN / DRAFT' };
 let currentUser = null;
 let currentDocumentId = null;
+let currentDocumentVersionId = null;
 let authStage = 'request';
 let resendTimer = null;
 let selectedModelId = 'fast';
@@ -90,6 +91,7 @@ function resetCreation() {
   renderStyleRail(styleRailStyles);
   conversationHistory = [];
   currentDocumentId = null;
+  currentDocumentVersionId = null;
   document.querySelector('#source-content').hidden = false;
   document.querySelector('#conversation').replaceChildren();
   document.querySelector('#conversation').hidden = true;
@@ -186,9 +188,27 @@ function renderDocuments(documents) {
   container.innerHTML = documents.map(item => `<button class="document-list-item" type="button" data-document-id="${escapeHtml(item.id)}"><span><b>${escapeHtml(item.title)}</b><small>${item.status === 'published' ? '已发布' : '草稿'} · ${item.versionCount} 个版本</small></span><time>${escapeHtml(item.updatedAt)}</time></button>`).join('');
 }
 
+function renderDocumentVersions(work, versions) {
+  document.querySelector('#documents-eyebrow').textContent = '作品版本';
+  document.querySelector('#documents-title').textContent = '选择一个版本';
+  document.querySelector('#documents-description').textContent = '重新打开任一版本后，后续修改会从它继续形成新的版本。';
+  document.querySelector('#back-to-documents').hidden = false;
+  const container = document.querySelector('#documents-results');
+  container.innerHTML = versions.map((item, index) => `<button class="document-list-item" type="button" data-document-id="${escapeHtml(work.id)}" data-version-id="${escapeHtml(item.id)}"><span><b>${item.current ? '当前版本 · ' : ''}第 ${versions.length - index} 版</b><small>${escapeHtml(item.title || '未命名作品')}</small></span><time>${escapeHtml(item.createdAt)}</time></button>`).join('');
+}
+
 async function loadDocuments() {
   const result = await api('/api/documents');
+  document.querySelector('#documents-eyebrow').textContent = '你的创作空间';
+  document.querySelector('#documents-title').textContent = '我的作品';
+  document.querySelector('#documents-description').textContent = '打开一份作品，继续在它的最新版本上修改。';
+  document.querySelector('#back-to-documents').hidden = true;
   renderDocuments(result.documents);
+}
+
+async function loadDocumentVersions(documentId) {
+  const result = await api(`/api/documents/${documentId}/versions`);
+  renderDocumentVersions(result.document, result.versions);
 }
 
 async function openDocumentsDialog() {
@@ -200,6 +220,7 @@ async function openDocumentsDialog() {
 function openDocument(work, version) {
   resetCreation();
   currentDocumentId = work.id;
+  currentDocumentVersionId = version.id;
   selectedDesign = version.design || selectedDesign;
   content.value = version.content;
   count.textContent = content.value.length;
@@ -210,7 +231,7 @@ function openDocument(work, version) {
   document.querySelector('#instruction').placeholder = '例如：标题更有力量，正文更精简，结尾更克制。';
   document.querySelector('#generate-hint').textContent = '⌘ Enter 修改';
   renderDocument();
-  const message = addConversationMessage('assistant', `已打开「${work.title}」的当前版本。你可以继续告诉我想调整的内容。`);
+  const message = addConversationMessage('assistant', `已打开「${work.title}」的一个版本。你可以继续告诉我想调整的内容。`);
   addPreviewToMessage(message, { id: work.id, versionId: version.id });
 }
 
@@ -287,11 +308,12 @@ document.querySelector('#generate').addEventListener('click', async () => {
     const result = await api('/api/generation-jobs', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
-      body: JSON.stringify({ modelId: selectedModelId, documentId: currentDocumentId || undefined, styleTemplateId: selectedStyleTemplateId || undefined, title: content.value.trim().split(/\n/)[0], content: content.value, instruction: instruction.value, history: [...conversationHistory, { role: 'user', content: direction || '请生成第一版视觉作品。' }] })
+      body: JSON.stringify({ modelId: selectedModelId, documentId: currentDocumentId || undefined, parentVersionId: currentDocumentVersionId || undefined, styleTemplateId: selectedStyleTemplateId || undefined, title: content.value.trim().split(/\n/)[0], content: content.value, instruction: instruction.value, history: [...conversationHistory, { role: 'user', content: direction || '请生成第一版视觉作品。' }] })
     });
     content.value = [result.composition.title, ...result.composition.paragraphs, result.composition.highlight].join('\n\n');
     count.textContent = content.value.length;
     currentDocumentId = result.document.id;
+    currentDocumentVersionId = result.document.versionId;
     selectedDesign = result.composition.design || selectedDesign;
     renderDocument();
     showGeneratedDocument();
@@ -373,11 +395,13 @@ document.querySelector('#my-documents').addEventListener('click', async event =>
   await openDocumentsDialog();
 });
 document.querySelector('#close-documents').addEventListener('click', () => document.querySelector('#documents-dialog').close());
+document.querySelector('#back-to-documents').addEventListener('click', () => loadDocuments().catch(() => showToast('作品列表暂不可用，请稍后重试')));
 document.querySelector('#documents-results').addEventListener('click', async event => {
   const item = event.target.closest('[data-document-id]');
   if (!item) return;
   try {
-    const result = await api(`/api/documents/${item.dataset.documentId}`);
+    if (!item.dataset.versionId) return await loadDocumentVersions(item.dataset.documentId);
+    const result = await api(`/api/documents/${item.dataset.documentId}?versionId=${encodeURIComponent(item.dataset.versionId)}`);
     document.querySelector('#documents-dialog').close();
     openDocument(result.document, result.version);
     showToast('已打开作品');
@@ -449,6 +473,7 @@ document.querySelector('#account-menu').addEventListener('click', async event =>
     await api('/api/auth/logout', { method: 'POST' });
     updateProfile(null);
     currentDocumentId = null;
+    currentDocumentVersionId = null;
     showToast('已登出');
   }
 });

@@ -52,7 +52,7 @@ async function createDocumentForOwner({ ownerId, payload, env }) {
   return { id: documentId, versionId, title, status: 'draft' };
 }
 
-async function createDocumentVersionForOwner({ ownerId, document, payload, env }) {
+async function createDocumentVersionForOwner({ ownerId, document, payload, parentVersionId, env }) {
   const versionId = id();
   const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim().slice(0, 120) : document.title;
   const objectKey = `documents/${document.id}/versions/${versionId}/safe.html`;
@@ -61,7 +61,7 @@ async function createDocumentVersionForOwner({ ownerId, document, payload, env }
 
   await env.ASSETS.put(objectKey, html, { httpMetadata: { contentType: 'text/html; charset=utf-8' } });
   await env.DB.batch([
-    env.DB.prepare('INSERT INTO document_versions (id, document_id, parent_version_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?, ?)').bind(versionId, document.id, document.current_version_id, JSON.stringify({ content: payload.content, design }), objectKey, 'approved'),
+    env.DB.prepare('INSERT INTO document_versions (id, document_id, parent_version_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?, ?)').bind(versionId, document.id, parentVersionId || document.current_version_id, JSON.stringify({ content: payload.content, design }), objectKey, 'approved'),
     env.DB.prepare('UPDATE documents SET title = ?, current_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?').bind(title, versionId, document.id, ownerId)
   ]);
 
@@ -88,9 +88,23 @@ async function getDocument(request, env, documentId) {
   if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
   const document = await env.DB.prepare('SELECT id, title, status, current_version_id AS currentVersionId, updated_at AS updatedAt, (SELECT COUNT(*) FROM document_versions v WHERE v.document_id = documents.id) AS versionCount FROM documents WHERE id = ? AND owner_id = ?').bind(documentId, ownerId).first();
   if (!document) return json({ error: 'not_found' }, { status: 404 });
-  const version = await env.DB.prepare('SELECT id, content_json AS contentJson, created_at AS createdAt FROM document_versions WHERE id = ? AND document_id = ? AND safety_status = ?').bind(document.currentVersionId, document.id, 'approved').first();
+  const requestedVersionId = new URL(request.url).searchParams.get('versionId');
+  const version = await env.DB.prepare('SELECT id, content_json AS contentJson, created_at AS createdAt FROM document_versions WHERE id = ? AND document_id = ? AND safety_status = ?').bind(requestedVersionId || document.currentVersionId, document.id, 'approved').first();
   if (!version) return json({ error: 'not_found' }, { status: 404 });
   return json({ document, version: { id: version.id, ...JSON.parse(version.contentJson), createdAt: version.createdAt } });
+}
+
+async function listDocumentVersions(request, env, documentId) {
+  const ownerId = await sessionUserId(request, env);
+  if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
+  const document = await env.DB.prepare('SELECT id, current_version_id AS currentVersionId FROM documents WHERE id = ? AND owner_id = ?').bind(documentId, ownerId).first();
+  if (!document) return json({ error: 'not_found' }, { status: 404 });
+  const result = await env.DB.prepare('SELECT id, parent_version_id AS parentVersionId, content_json AS contentJson, created_at AS createdAt FROM document_versions WHERE document_id = ? AND safety_status = ? ORDER BY created_at DESC LIMIT 50').bind(document.id, 'approved').all();
+  const versions = (result.results || []).map(version => {
+    const content = JSON.parse(version.contentJson).content || '';
+    return { id: version.id, parentVersionId: version.parentVersionId, createdAt: version.createdAt, title: content.trim().split(/\n/)[0].slice(0, 80), current: version.id === document.currentVersionId };
+  });
+  return json({ document, versions });
 }
 
 async function publishDocument(request, env, documentId) {
@@ -264,6 +278,8 @@ async function createGenerationJob(request, env) {
     ? await env.DB.prepare('SELECT id, title, status, current_version_id FROM documents WHERE id = ? AND owner_id = ?').bind(payload.documentId, ownerId).first()
     : null;
   if (typeof payload.documentId === 'string' && !existingDocument) return json({ error: 'not_found' }, { status: 404 });
+  const parentVersionId = typeof payload.parentVersionId === 'string' ? payload.parentVersionId : null;
+  if (parentVersionId && (!existingDocument || !(await env.DB.prepare('SELECT id FROM document_versions WHERE id = ? AND document_id = ? AND safety_status = ?').bind(parentVersionId, existingDocument.id, 'approved').first()))) return badRequest('invalid parent version');
   const reference = typeof payload.styleTemplateId === 'string'
     ? await env.DB.prepare('SELECT v.content_json FROM style_templates t JOIN document_versions v ON v.id = t.source_version_id WHERE t.id = ?').bind(payload.styleTemplateId).first()
     : null;
@@ -294,7 +310,7 @@ async function createGenerationJob(request, env) {
       });
       const generatedContent = [...composition.paragraphs, composition.highlight].join('\n\n');
       const document = existingDocument
-        ? await createDocumentVersionForOwner({ ownerId, document: existingDocument, payload: { title: composition.title, content: generatedContent, design: composition.design }, env })
+        ? await createDocumentVersionForOwner({ ownerId, document: existingDocument, parentVersionId, payload: { title: composition.title, content: generatedContent, design: composition.design }, env })
         : await createDocumentForOwner({ ownerId, payload: { title: composition.title, content: generatedContent, design: composition.design }, env });
       await env.DB.prepare("UPDATE generation_jobs SET document_id = ?, status = 'succeeded', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?").bind(document.id, reservation.job.id, ownerId).run();
       return json({ job: { ...reservation.job, status: 'succeeded' }, document, composition }, { status: 201 });
@@ -397,6 +413,9 @@ export default {
 
     const documentMatch = url.pathname.match(/^\/api\/documents\/([^/]+)$/);
     if (request.method === 'GET' && documentMatch) return getDocument(request, env, documentMatch[1]);
+
+    const documentVersionsMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/versions$/);
+    if (request.method === 'GET' && documentVersionsMatch) return listDocumentVersions(request, env, documentVersionsMatch[1]);
 
     const publishMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/publish$/);
     if (request.method === 'POST' && publishMatch) return publishDocument(request, env, publishMatch[1]);
