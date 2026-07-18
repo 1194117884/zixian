@@ -217,6 +217,23 @@ async function openDocumentsDialog() {
   try { await loadDocuments(); } catch { showToast('作品列表暂不可用，请稍后重试'); }
 }
 
+function renderPublications({ pages, styles }) {
+  const container = document.querySelector('#publications-results');
+  if (!pages.length && !styles.length) {
+    container.innerHTML = '<p class="library-empty">还没有发布内容。完成作品后，可以将任一版本发布为网页或风格。</p>';
+    return;
+  }
+  const pageItems = pages.length ? `<section class="publication-section"><h3>可分享网页</h3>${pages.map(item => `<article class="publication-item"><span><b>${escapeHtml(item.title)}</b><small>${escapeHtml(item.createdAt)}</small></span><span class="publication-actions"><button type="button" data-publication-action="open" data-publication-url="${escapeHtml(item.url)}">打开</button><button type="button" data-publication-action="copy" data-publication-url="${escapeHtml(item.url)}">复制链接</button></span></article>`).join('')}</section>` : '';
+  const styleItems = styles.length ? `<section class="publication-section"><h3>公开风格</h3>${styles.map(item => `<article class="publication-item style"><span>${item.previewUrl ? `<img src="${escapeHtml(item.previewUrl)}" alt="">` : '<i>字</i>'}<span><b>${escapeHtml(item.title)}</b><small>♥ ${item.likes}　↗ ${item.uses}</small></span></span><button type="button" data-publication-action="use-style" data-style-id="${escapeHtml(item.id)}">套用</button></article>`).join('')}</section>` : '';
+  container.innerHTML = pageItems + styleItems;
+}
+
+async function openPublicationsDialog() {
+  if (!await requireLogin()) return;
+  document.querySelector('#publications-dialog').showModal();
+  try { renderPublications(await api('/api/publications')); } catch { showToast('已发布内容暂不可用，请稍后重试'); }
+}
+
 function openDocument(work, version) {
   resetCreation();
   currentDocumentId = work.id;
@@ -394,7 +411,12 @@ document.querySelector('#my-documents').addEventListener('click', async event =>
   event.preventDefault();
   await openDocumentsDialog();
 });
+document.querySelector('#my-publications').addEventListener('click', async event => {
+  event.preventDefault();
+  await openPublicationsDialog();
+});
 document.querySelector('#close-documents').addEventListener('click', () => document.querySelector('#documents-dialog').close());
+document.querySelector('#close-publications').addEventListener('click', () => document.querySelector('#publications-dialog').close());
 document.querySelector('#back-to-documents').addEventListener('click', () => loadDocuments().catch(() => showToast('作品列表暂不可用，请稍后重试')));
 document.querySelector('#documents-results').addEventListener('click', async event => {
   const item = event.target.closest('[data-document-id]');
@@ -431,6 +453,25 @@ document.querySelector('#style-results').addEventListener('click', async event =
       showToast(`已应用「${result.style.title}」`);
     }
   } catch { showToast('操作失败，请稍后重试'); }
+});
+document.querySelector('#publications-results').addEventListener('click', async event => {
+  const button = event.target.closest('[data-publication-action]');
+  if (!button) return;
+  const action = button.dataset.publicationAction;
+  if (action === 'open') return window.open(button.dataset.publicationUrl, '_blank', 'noopener');
+  if (action === 'copy') {
+    await navigator.clipboard?.writeText(button.dataset.publicationUrl);
+    return showToast('分享链接已复制');
+  }
+  if (action === 'use-style') {
+    try {
+      const result = await api(`/api/styles/${button.dataset.styleId}/use`, { method: 'POST' });
+      chooseStyleReference(result.style);
+      document.querySelector('#publications-dialog').close();
+      loadStyleRail().catch(() => undefined);
+      showToast(`已应用「${result.style.title}」`);
+    } catch { showToast('套用风格失败，请稍后重试'); }
+  }
 });
 document.querySelector('#close-dialog').addEventListener('click', () => document.querySelector('#share-dialog').close());
 document.querySelector('#close-publish-style').addEventListener('click', () => document.querySelector('#publish-style-dialog').close());

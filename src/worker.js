@@ -141,6 +141,20 @@ async function servePublishedPage(env, publicSlug) {
   return new Response(object.body, { headers: htmlHeaders });
 }
 
+async function listPublications(request, env) {
+  const ownerId = await sessionUserId(request, env);
+  if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
+  const [pages, styles] = await Promise.all([
+    env.DB.prepare('SELECT p.slug, d.title, p.created_at AS createdAt FROM published_pages p JOIN documents d ON d.id = p.document_id WHERE d.owner_id = ? ORDER BY p.created_at DESC LIMIT 50').bind(ownerId).all(),
+    env.DB.prepare('SELECT id, title, preview_object_key AS previewObjectKey, likes_count AS likes, uses_count AS uses, created_at AS createdAt FROM style_templates WHERE owner_id = ? ORDER BY created_at DESC LIMIT 50').bind(ownerId).all()
+  ]);
+  const origin = new URL(request.url).origin;
+  return json({
+    pages: (pages.results || []).map(page => ({ ...page, url: `${origin}/p/${page.slug}` })),
+    styles: (styles.results || []).map(style => ({ ...style, previewUrl: style.previewObjectKey ? `/api/styles/${style.id}/preview` : null }))
+  });
+}
+
 async function publishStyleTemplate(request, env, documentId) {
   const ownerId = await sessionUserId(request, env);
   if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
@@ -405,6 +419,7 @@ export default {
 
     if (request.method === 'GET' && url.pathname === '/api/wallet') return wallet(request, env);
     if (request.method === 'POST' && url.pathname === '/api/test-payments') return testPayment(request, env);
+    if (request.method === 'GET' && url.pathname === '/api/publications') return listPublications(request, env);
 
     if (request.method === 'POST' && url.pathname === '/api/generation-jobs') return createGenerationJob(request, env);
 
