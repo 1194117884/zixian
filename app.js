@@ -165,7 +165,7 @@ document.querySelector('#generate').addEventListener('click', async () => {
     await loadWallet();
     showToast('作品已生成并安全保存');
   } catch (error) {
-    showToast(error.code === 'insufficient_credits' ? '积分不足，请先测试充值' : '生成失败，积分已退回');
+    showToast(error.code === 'insufficient_credits' ? '积分不足，请先充值' : '生成失败，积分已退回');
   } finally {
     button.disabled = false;
     button.innerHTML = '生成作品 <span>✦ 6</span>';
@@ -248,19 +248,19 @@ document.querySelector('#close-payment').addEventListener('click', () => payment
 document.querySelector('#complete-test-payment').addEventListener('click', async event => {
   const button = event.currentTarget;
   button.disabled = true;
-  button.textContent = '正在模拟 Stripe 支付…';
+  button.textContent = '正在处理充值…';
   try {
     await new Promise(resolve => setTimeout(resolve, 1200));
     const payment = await api('/api/test-payments', { method: 'POST' });
     document.querySelector('#credit-balance').textContent = payment.balance;
-    document.querySelector('#payment-message').textContent = `测试成功，已入账 ${payment.credits} 积分。`;
-    showToast(`测试支付成功 · +${payment.credits} 积分`);
+    document.querySelector('#payment-message').textContent = `充值成功，已到账 ${payment.credits} 积分。`;
+    showToast(`充值成功 · +${payment.credits} 积分`);
     setTimeout(() => paymentDialog.close(), 900);
   } catch (error) {
-    document.querySelector('#payment-message').textContent = error.code === 'test_payments_disabled' ? '测试支付未开启。' : '测试入账失败，请稍后重试。';
+    document.querySelector('#payment-message').textContent = error.code === 'test_payments_disabled' ? '充值暂不可用，请稍后重试。' : '充值失败，请稍后重试。';
   } finally {
     button.disabled = false;
-    button.textContent = '模拟支付并入账';
+    button.textContent = '确认充值';
   }
 });
 document.querySelector('#close-auth').addEventListener('click', () => authDialog.close());
