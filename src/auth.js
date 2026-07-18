@@ -16,17 +16,6 @@ export function createCode() {
   return String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, '0');
 }
 
-export async function validateTurnstile(token, request, env, fetcher = fetch) {
-  if (!token || !env.TURNSTILE_SECRET_KEY) return false;
-  const body = new FormData();
-  body.set('secret', env.TURNSTILE_SECRET_KEY);
-  body.set('response', token);
-  const ip = request.headers.get('CF-Connecting-IP');
-  if (ip) body.set('remoteip', ip);
-  const response = await fetcher('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body });
-  return response.ok && (await response.json()).success === true;
-}
-
 export async function sendCodeEmail({ email, code, env, fetcher = fetch }) {
   if (!env.RESEND_API_KEY || !env.RESEND_FROM) throw new Error('email_unavailable');
   const response = await fetcher('https://api.resend.com/emails', {

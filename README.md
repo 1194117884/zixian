@@ -7,7 +7,7 @@
 - 选择设计语言并引用为创作上下文
 - 输入内容与补充要求
 - 在隔离的 HTML `iframe` 中实时预览
-- 邮箱验证码登录、会话恢复与 Turnstile 人机验证
+- 邮箱验证码登录、会话恢复与 IP/邮箱频率限制
 - 保存安全 HTML、发布静态分享链接，以及 Browser Run 高清导出
 - 预扣积分后调用模型；模型只生成受限文案 JSON，失败自动退款
 
@@ -21,10 +21,10 @@
 
 本地填写 `.dev.vars`；该文件已被 Git 忽略。部署到 Cloudflare 后，敏感值使用 `wrangler secret put <变量名>` 或 Worker Dashboard 的 Secrets 配置，非敏感值使用环境变量配置。
 
-- Secrets：`AUTH_PEPPER`、`TURNSTILE_SECRET_KEY`、`RESEND_API_KEY`、各模型 API Key
-- 非敏感配置：`RESEND_FROM`、`TURNSTILE_SITE_KEY`、`APP_ORIGIN`
+- Secrets：`AUTH_PEPPER`、`RESEND_API_KEY`、各模型 API Key
+- 非敏感配置：`RESEND_FROM`、`APP_ORIGIN`
 
-`TURNSTILE_SITE_KEY` 会被 `/api/public-config` 返回给浏览器，这是 Turnstile 设计上可公开的站点键；其余认证和邮件密钥不会进入前端。Cloudflare 部署时，在 Worker 的 Variables 中填写该站点键，并将三个敏感认证值设为 Secrets。
+当前登录发送由 Worker 的 IP/邮箱频率限制和同邮箱 60 秒冷却保护。面向中国大陆的独立人机验证服务会在后续接入。
 
 ## 测试充值
 

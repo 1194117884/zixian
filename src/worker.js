@@ -3,7 +3,7 @@ import { generateComposition, modelCatalog } from './models.js';
 import { refundGenerationCredits, reserveGenerationCredits } from './credits.js';
 import { grantTestCredits } from './payments.js';
 import { exportObjectKey, renderHtmlToPng } from './export.js';
-import { clearSessionCookie, createCode, createSession, hashSecret, normalizeEmail, sendCodeEmail, sessionCookie, sessionUserId, validEmail, validateTurnstile } from './auth.js';
+import { clearSessionCookie, createCode, createSession, hashSecret, normalizeEmail, sendCodeEmail, sessionCookie, sessionUserId, validEmail } from './auth.js';
 
 const json = (body, init = {}) => new Response(JSON.stringify(body), {
   ...init,
@@ -180,7 +180,7 @@ async function testPayment(request, env) {
 async function requestLoginCode(request, env) {
   const payload = await request.json().catch(() => null);
   const email = normalizeEmail(payload?.email);
-  if (!validEmail(email) || !await validateTurnstile(payload?.turnstileToken, request, env)) return json({ error: 'verification_required' }, { status: 400 });
+  if (!validEmail(email)) return badRequest('invalid email');
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
   const limits = await Promise.all([env.AUTH_RATE_LIMIT.limit({ key: `email:${email}` }), env.AUTH_RATE_LIMIT.limit({ key: `ip:${ip}` })]);
   if (limits.some(result => !result.success)) return json({ error: 'rate_limited' }, { status: 429 });
@@ -230,10 +230,6 @@ export default {
 
     if (request.method === 'GET' && url.pathname === '/api/models') {
       return json({ models: Object.entries(modelCatalog).map(([id, model]) => ({ id, label: model.label, credits: model.credits })) });
-    }
-
-    if (request.method === 'GET' && url.pathname === '/api/public-config') {
-      return json({ turnstileSiteKey: env.TURNSTILE_SITE_KEY || null });
     }
 
     if (request.method === 'POST' && url.pathname === '/api/auth/request-code') return requestLoginCode(request, env);

@@ -3,7 +3,6 @@
 
 # Required security and authentication secrets
 AUTH_PEPPER=
-TURNSTILE_SECRET_KEY=
 RESEND_API_KEY=
 
 # Model-provider secrets (enable only the providers you offer)
@@ -18,7 +17,6 @@ ANTHROPIC_BASE_URL=
 
 # Non-secret runtime configuration
 RESEND_FROM=字见 <login@auth.example.com>
-TURNSTILE_SITE_KEY=
 APP_ORIGIN=http://localhost:4173
 
 # Test-only: enables the fake Stripe success flow. Never use this for real payments.
