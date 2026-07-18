@@ -20,7 +20,8 @@
         </nav>
         <div class="sidebar-bottom">
           <div class="credit-card"><span class="spark">✦</span><div><b id="credit-balance">—</b><small>可用积分</small></div><button id="buy-credits" aria-label="充值">+</button></div>
-          <button class="profile" id="login"><span class="avatar" id="avatar">字</span><span class="profile-copy"><b id="profile-name">登录以保存作品</b><small id="profile-detail">登录后可发布与导出</small></span><span class="profile-menu">···</span></button>
+          <div class="account-menu" id="account-menu" hidden><div class="account-menu-header"><span class="avatar" id="account-avatar">字</span><span><b id="account-email">登录以保存作品</b><small>字见创作空间</small></span></div><div class="account-menu-actions"><button type="button" data-account-action="credits"><span>✦</span><span>可用积分</span><b id="account-balance">—</b></button><button type="button" data-account-action="works"><span>◫</span><span>我的作品</span><i>›</i></button><button type="button" data-account-action="logout"><span>↪</span><span>退出登录</span></button></div></div>
+          <button class="profile" id="login" aria-expanded="false"><span class="avatar" id="avatar">字</span><span class="profile-copy"><b id="profile-name">登录以保存作品</b><small id="profile-detail">登录后可发布与导出</small></span><span class="profile-menu">···</span></button>
         </div>
       </aside>
       <section class="workspace">

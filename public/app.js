@@ -129,13 +129,21 @@ function updateProfile(user) {
   document.querySelector('#profile-name').textContent = user ? user.email : '登录以保存作品';
   document.querySelector('#profile-detail').textContent = user ? '个人创作空间' : '登录后可发布与导出';
   document.querySelector('#avatar').textContent = user ? user.email.slice(0, 1).toUpperCase() : '字';
-  if (!user) document.querySelector('#credit-balance').textContent = '—';
+  document.querySelector('#account-email').textContent = user ? user.email : '登录以保存作品';
+  document.querySelector('#account-avatar').textContent = user ? user.email.slice(0, 1).toUpperCase() : '字';
+  if (!user) {
+    document.querySelector('#credit-balance').textContent = '—';
+    document.querySelector('#account-balance').textContent = '—';
+    document.querySelector('#account-menu').hidden = true;
+    document.querySelector('#login').setAttribute('aria-expanded', 'false');
+  }
 }
 
 async function loadWallet() {
   if (!currentUser) return;
   const wallet = await api('/api/wallet');
   document.querySelector('#credit-balance').textContent = wallet.balance;
+  document.querySelector('#account-balance').textContent = wallet.balance;
 }
 
 function openLogin() {
@@ -181,6 +189,12 @@ function renderDocuments(documents) {
 async function loadDocuments() {
   const result = await api('/api/documents');
   renderDocuments(result.documents);
+}
+
+async function openDocumentsDialog() {
+  if (!await requireLogin()) return;
+  document.querySelector('#documents-dialog').showModal();
+  try { await loadDocuments(); } catch { showToast('作品列表暂不可用，请稍后重试'); }
 }
 
 function openDocument(work, version) {
@@ -356,9 +370,7 @@ document.querySelectorAll('.open-style-library').forEach(button => button.addEve
 }));
 document.querySelector('#my-documents').addEventListener('click', async event => {
   event.preventDefault();
-  if (!await requireLogin()) return;
-  document.querySelector('#documents-dialog').showModal();
-  try { await loadDocuments(); } catch { showToast('作品列表暂不可用，请稍后重试'); }
+  await openDocumentsDialog();
 });
 document.querySelector('#close-documents').addEventListener('click', () => document.querySelector('#documents-dialog').close());
 document.querySelector('#documents-results').addEventListener('click', async event => {
@@ -420,7 +432,33 @@ document.querySelector('#copy-link').addEventListener('click', async () => {
 document.querySelector('#new-work').addEventListener('click', () => {
   content.value = ''; instruction.value = ''; count.textContent = '0'; resetCreation(); renderDocument(); content.focus(); showToast('已新建空白作品');
 });
-document.querySelector('#login').addEventListener('click', () => currentUser ? api('/api/auth/logout', { method: 'POST' }).then(() => { updateProfile(null); currentDocumentId = null; showToast('已登出'); }) : openLogin());
+document.querySelector('#login').addEventListener('click', () => {
+  if (!currentUser) return openLogin();
+  const menu = document.querySelector('#account-menu');
+  menu.hidden = !menu.hidden;
+  document.querySelector('#login').setAttribute('aria-expanded', String(!menu.hidden));
+});
+document.querySelector('#account-menu').addEventListener('click', async event => {
+  const action = event.target.closest('[data-account-action]')?.dataset.accountAction;
+  if (!action) return;
+  document.querySelector('#account-menu').hidden = true;
+  document.querySelector('#login').setAttribute('aria-expanded', 'false');
+  if (action === 'credits') return document.querySelector('#buy-credits').click();
+  if (action === 'works') return openDocumentsDialog();
+  if (action === 'logout') {
+    await api('/api/auth/logout', { method: 'POST' });
+    updateProfile(null);
+    currentDocumentId = null;
+    showToast('已登出');
+  }
+});
+document.addEventListener('click', event => {
+  const menu = document.querySelector('#account-menu');
+  if (!menu.hidden && !event.target.closest('#account-menu, #login')) {
+    menu.hidden = true;
+    document.querySelector('#login').setAttribute('aria-expanded', 'false');
+  }
+});
 document.querySelector('#buy-credits').addEventListener('click', async () => {
   if (!await requireLogin()) return;
   document.querySelector('#payment-message').textContent = '';
