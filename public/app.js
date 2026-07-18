@@ -60,7 +60,7 @@ function addPreviewToMessage(message, documentVersion) {
   bubble.className = 'document-bubble';
   const iframe = document.createElement('iframe');
   iframe.title = `第 ${versionCount} 版作品预览`;
-  iframe.sandbox = '';
+  iframe.sandbox = 'allow-same-origin';
   iframe.srcdoc = preview.srcdoc;
   bubble.append(iframe);
   message.append(bubble);
@@ -71,6 +71,36 @@ function addPreviewToMessage(message, documentVersion) {
   actions.dataset.versionId = documentVersion.versionId;
   actions.innerHTML = '<button type="button" data-output-action="share">分享</button><button type="button" data-output-action="export">生成高清图</button><button type="button" data-output-action="style">发布为风格</button>';
   message.append(actions);
+}
+
+async function downloadPreviewPng(actions) {
+  const iframe = actions.previousElementSibling?.querySelector('iframe');
+  const source = iframe?.contentDocument;
+  if (!source?.documentElement) throw new Error('client_export_unavailable');
+  const width = Math.max(source.documentElement.scrollWidth, source.documentElement.clientWidth);
+  const height = Math.max(source.documentElement.scrollHeight, source.documentElement.clientHeight);
+  const outputWidth = 1080;
+  const outputHeight = Math.ceil(height * outputWidth / width);
+  const markup = source.documentElement.outerHTML.replace('<html', '<html xmlns="http://www.w3.org/1999/xhtml"');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${outputWidth}" height="${outputHeight}" viewBox="0 0 ${width} ${height}"><foreignObject width="${width}" height="${height}">${markup}</foreignObject></svg>`;
+  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
+  const image = new Image();
+  try {
+    await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; image.src = url; });
+    const canvas = document.createElement('canvas');
+    canvas.width = outputWidth;
+    canvas.height = outputHeight;
+    canvas.getContext('2d').drawImage(image, 0, 0, outputWidth, outputHeight);
+    const png = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    if (!png) throw new Error('client_export_unavailable');
+    const download = document.createElement('a');
+    download.href = URL.createObjectURL(png);
+    download.download = 'zixian.png';
+    download.click();
+    setTimeout(() => URL.revokeObjectURL(download.href), 1000);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 function showGeneratedDocument() {
@@ -384,9 +414,14 @@ document.querySelector('#conversation').addEventListener('click', async event =>
       document.querySelector('#share-dialog').showModal();
     }
     if (button.dataset.outputAction === 'export') {
-      showToast('正在生成高清图…');
-      const output = await api(`/api/documents/${documentId}/exports`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ versionId }) });
-      window.location.assign(output.downloadUrl);
+      try {
+        await downloadPreviewPng(actions);
+        showToast('高清图已开始下载');
+      } catch {
+        showToast('正在生成高清图…');
+        const output = await api(`/api/documents/${documentId}/exports`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ versionId }) });
+        window.location.assign(output.downloadUrl);
+      }
     }
     if (button.dataset.outputAction === 'style') {
       const dialog = document.querySelector('#publish-style-dialog');
