@@ -51,6 +51,21 @@ async function createDocumentForOwner({ ownerId, payload, env }) {
   return { id: documentId, versionId, title, status: 'draft' };
 }
 
+async function createDocumentVersionForOwner({ ownerId, document, payload, env }) {
+  const versionId = id();
+  const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim().slice(0, 120) : document.title;
+  const objectKey = `documents/${document.id}/versions/${versionId}/safe.html`;
+  const html = createSafeDocument({ title, content: payload.content, style: payload.style });
+
+  await env.ASSETS.put(objectKey, html, { httpMetadata: { contentType: 'text/html; charset=utf-8' } });
+  await env.DB.batch([
+    env.DB.prepare('INSERT INTO document_versions (id, document_id, parent_version_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?, ?)').bind(versionId, document.id, document.current_version_id, JSON.stringify({ content: payload.content, style: payload.style }), objectKey, 'approved'),
+    env.DB.prepare('UPDATE documents SET title = ?, current_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?').bind(title, versionId, document.id, ownerId)
+  ]);
+
+  return { id: document.id, versionId, title, status: document.status };
+}
+
 async function createDocument(request, env) {
   const ownerId = await sessionUserId(request, env);
   if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
@@ -194,6 +209,10 @@ async function createGenerationJob(request, env) {
   if (!idempotencyKey) return badRequest('idempotency-key header is required');
   const payload = await request.json().catch(() => null);
   if (!validDocumentPayload(payload) || typeof payload.modelId !== 'string') return badRequest('valid content, style, and modelId are required');
+  const existingDocument = typeof payload.documentId === 'string'
+    ? await env.DB.prepare('SELECT id, title, status, current_version_id FROM documents WHERE id = ? AND owner_id = ?').bind(payload.documentId, ownerId).first()
+    : null;
+  if (typeof payload.documentId === 'string' && !existingDocument) return json({ error: 'not_found' }, { status: 404 });
 
   try {
     const reservation = await reserveGenerationCredits({
@@ -218,7 +237,9 @@ async function createGenerationJob(request, env) {
         env
       });
       const generatedContent = [...composition.paragraphs, composition.highlight].join('\n\n');
-      const document = await createDocumentForOwner({ ownerId, payload: { title: composition.title, content: generatedContent, style: payload.style }, env });
+      const document = existingDocument
+        ? await createDocumentVersionForOwner({ ownerId, document: existingDocument, payload: { title: composition.title, content: generatedContent, style: payload.style }, env })
+        : await createDocumentForOwner({ ownerId, payload: { title: composition.title, content: generatedContent, style: payload.style }, env });
       await env.DB.prepare("UPDATE generation_jobs SET document_id = ?, status = 'succeeded', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?").bind(document.id, reservation.job.id, ownerId).run();
       return json({ job: { ...reservation.job, status: 'succeeded' }, document, composition }, { status: 201 });
     } catch (error) {

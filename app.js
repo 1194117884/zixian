@@ -1,7 +1,6 @@
 const content = document.querySelector('#content');
 const instruction = document.querySelector('#instruction');
 const count = document.querySelector('#count');
-const styleName = document.querySelector('#style-name');
 const preview = document.querySelector('#preview');
 const paper = document.querySelector('#paper-wrap');
 const toast = document.querySelector('#toast');
@@ -18,6 +17,8 @@ let authStage = 'request';
 let resendTimer = null;
 let selectedModelId = 'fast';
 let availableModels = [];
+let hasGenerated = false;
+let versionCount = 0;
 
 function escapeHtml(value) {
   return value.replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
@@ -44,6 +45,45 @@ function renderDocument() {
   const t = themes[selectedStyle];
   const paragraphs = body.map((block, index) => `<p class="body ${index === 0 ? 'first' : ''}">${block}</p>`).join('');
   preview.srcdoc = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>*{box-sizing:border-box}body{margin:0;padding:38px 31px;min-height:100vh;background:${t.bg};color:${t.ink};font-family:${t.font};display:flex;flex-direction:column}.top{font:600 9px Arial;letter-spacing:.18em;opacity:.68;border-bottom:1px solid currentColor;padding-bottom:14px}.number{font:10px Arial;letter-spacing:.1em;margin-top:30px;opacity:.65}.title{font-size:${selectedStyle === 'board' ? '29' : '25'}px;line-height:1.24;letter-spacing:-.06em;margin:9px 0 20px;font-weight:800}.body{font-size:13px;line-height:1.85;margin:0 0 15px}.first:first-letter{font-size:1.35em;font-weight:bold}.highlight{margin-top:auto;padding:14px 14px 15px;border-left:4px solid ${t.accent};background:rgba(255,255,255,.34);font-size:15px;line-height:1.55;font-weight:700;letter-spacing:-.03em}.foot{font:9px Arial;letter-spacing:.12em;opacity:.55;margin-top:25px}.line{width:33px;height:3px;background:${t.accent};margin:3px 0 20px}</style></head><body><div class="top">${t.top}</div><div class="number">01 — 想法记录</div><h1 class="title">${title}</h1><div class="line"></div>${paragraphs}<div class="highlight">${highlight}</div><div class="foot">ZIXIAN / VISUAL NOTE</div></body></html>`;
+}
+
+function addConversationMessage(role, text) {
+  const conversation = document.querySelector('#conversation');
+  conversation.hidden = false;
+  const message = document.createElement('article');
+  message.className = `conversation-message ${role}`;
+  message.innerHTML = role === 'user'
+    ? `<span>你</span><p>${escapeHtml(text)}</p>`
+    : `<span>字见</span><p>${escapeHtml(text)}</p>`;
+  conversation.append(message);
+  conversation.scrollTop = conversation.scrollHeight;
+}
+
+function showGeneratedDocument() {
+  hasGenerated = true;
+  versionCount += 1;
+  document.querySelector('#paper-wrap').hidden = false;
+  document.querySelector('#preview-empty').hidden = true;
+  document.querySelector('#preview-status').innerHTML = '<i></i> 第 ' + versionCount + ' 版已生成';
+  document.querySelector('#source-content').hidden = true;
+  document.querySelector('#prompt-label').textContent = '继续修改';
+  document.querySelector('#instruction').placeholder = '例如：标题更有力量，正文更精简，结尾更克制。';
+  document.querySelector('#generate-hint').textContent = '⌘ Enter 修改';
+}
+
+function resetCreation() {
+  hasGenerated = false;
+  versionCount = 0;
+  currentDocumentId = null;
+  document.querySelector('#paper-wrap').hidden = true;
+  document.querySelector('#preview-empty').hidden = false;
+  document.querySelector('#preview-status').textContent = '等待生成';
+  document.querySelector('#source-content').hidden = false;
+  document.querySelector('#conversation').replaceChildren();
+  document.querySelector('#conversation').hidden = true;
+  document.querySelector('#prompt-label').textContent = '生成要求';
+  document.querySelector('#instruction').placeholder = '补充你的生成要求（可选）';
+  document.querySelector('#generate-hint').textContent = '⌘ Enter 生成';
 }
 
 function showToast(message) {
@@ -101,10 +141,9 @@ function setAuthMessage(message, isError = false) {
 function chooseStyle(style, label = styleNames[style]) {
   if (!styleNames[style]) return;
   selectedStyle = style;
-  currentDocumentId = null;
+  if (!hasGenerated) currentDocumentId = null;
   document.querySelectorAll('.style-card').forEach(item => item.classList.toggle('selected', item.dataset.style === style));
-  styleName.textContent = label || styleNames[style];
-  renderDocument();
+  if (!hasGenerated) renderDocument();
 }
 
 function renderStyleLibrary(styles) {
@@ -159,8 +198,7 @@ async function saveDocument() {
   return saved;
 }
 
-content.addEventListener('input', () => { count.textContent = content.value.length; currentDocumentId = null; renderDocument(); });
-instruction.addEventListener('input', () => { currentDocumentId = null; });
+content.addEventListener('input', () => { count.textContent = content.value.length; if (!hasGenerated) { currentDocumentId = null; renderDocument(); } });
 document.querySelector('#styles').addEventListener('click', event => {
   const card = event.target.closest('.style-card');
   if (!card) return;
@@ -170,19 +208,25 @@ document.querySelector('#styles').addEventListener('click', event => {
 document.querySelector('#generate').addEventListener('click', async () => {
   if (!await requireLogin()) return;
   if (!content.value.trim()) return showToast('先写下一点想表达的内容吧');
+  if (hasGenerated && !instruction.value.trim()) return showToast('告诉我这一版还想怎样调整');
   const button = document.querySelector('#generate');
   button.disabled = true;
-  button.textContent = '正在生成…';
+  const direction = instruction.value.trim();
+  button.textContent = hasGenerated ? '正在修改…' : '正在生成…';
+  if (hasGenerated && direction) addConversationMessage('user', direction);
   try {
     const result = await api('/api/generation-jobs', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
-      body: JSON.stringify({ modelId: selectedModelId, title: content.value.trim().split(/\n/)[0], content: content.value, instruction: instruction.value, style: selectedStyle })
+      body: JSON.stringify({ modelId: selectedModelId, documentId: currentDocumentId || undefined, title: content.value.trim().split(/\n/)[0], content: content.value, instruction: instruction.value, style: selectedStyle })
     });
     content.value = [result.composition.title, ...result.composition.paragraphs, result.composition.highlight].join('\n\n');
     count.textContent = content.value.length;
     currentDocumentId = result.document.id;
     renderDocument();
+    showGeneratedDocument();
+    addConversationMessage('assistant', `第 ${versionCount} 版已完成。你可以继续告诉我想调整的内容。`);
+    instruction.value = '';
     await loadWallet();
     showToast('作品已生成并安全保存');
   } catch (error) {
@@ -261,7 +305,7 @@ document.querySelector('#copy-link').addEventListener('click', async () => {
   showToast('分享链接已复制');
 });
 document.querySelector('#new-work').addEventListener('click', () => {
-  content.value = ''; instruction.value = ''; count.textContent = '0'; currentDocumentId = null; renderDocument(); content.focus(); showToast('已新建空白作品');
+  content.value = ''; instruction.value = ''; count.textContent = '0'; resetCreation(); renderDocument(); content.focus(); showToast('已新建空白作品');
 });
 document.querySelector('#zoom-in').addEventListener('click', () => { zoom = Math.min(100, zoom + 11); paper.style.transform = `scale(${zoom / 67})`; document.querySelector('#zoom').textContent = `${zoom}%`; });
 document.querySelector('#zoom-out').addEventListener('click', () => { zoom = Math.max(45, zoom - 11); paper.style.transform = `scale(${zoom / 67})`; document.querySelector('#zoom').textContent = `${zoom}%`; });
@@ -322,4 +366,3 @@ document.addEventListener('keydown', event => { if ((event.metaKey || event.ctrl
 
 api('/api/auth/me').then(async result => { updateProfile(result.user); await loadWallet(); }).catch(() => updateProfile(null));
 loadModels().catch(() => renderModelOptions([]));
-renderDocument();
