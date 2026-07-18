@@ -77,6 +77,27 @@ function setAuthMessage(message, isError = false) {
   authMessage.classList.toggle('error', isError);
 }
 
+function chooseStyle(style, label = styleNames[style]) {
+  if (!styleNames[style]) return;
+  selectedStyle = style;
+  currentDocumentId = null;
+  document.querySelectorAll('.style-card').forEach(item => item.classList.toggle('selected', item.dataset.style === style));
+  styleName.textContent = label || styleNames[style];
+  renderDocument();
+}
+
+function renderStyleLibrary(styles) {
+  const container = document.querySelector('#style-results');
+  if (!styles.length) { container.innerHTML = '<p class="library-empty">还没有公开风格。发布你的第一份作品吧。</p>'; return; }
+  container.innerHTML = styles.map(item => `<article class="library-card" data-template-id="${escapeHtml(item.id)}" data-style="${escapeHtml(item.style)}"><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.description || styleNames[item.style] || '')}</p><div class="library-meta"><span>${escapeHtml(item.author || '字见用户')}</span><span>♥ ${item.likes}</span><span>↗ ${item.uses}</span></div><div class="library-actions"><button class="like-style" type="button">${item.liked ? '已喜欢' : '喜欢'}</button><button class="use-style" type="button">使用风格</button></div></article>`).join('');
+}
+
+async function loadStyleLibrary() {
+  const query = document.querySelector('#style-search').value.trim();
+  const response = await api(`/api/styles${query ? `?q=${encodeURIComponent(query)}` : ''}`);
+  renderStyleLibrary(response.styles);
+}
+
 function startResendCountdown(seconds = 60) {
   const countdown = document.querySelector('#resend-countdown');
   const resend = document.querySelector('#resend-code');
@@ -122,11 +143,7 @@ instruction.addEventListener('input', () => { currentDocumentId = null; });
 document.querySelector('#styles').addEventListener('click', event => {
   const card = event.target.closest('.style-card');
   if (!card) return;
-  selectedStyle = card.dataset.style;
-  currentDocumentId = null;
-  document.querySelectorAll('.style-card').forEach(item => item.classList.toggle('selected', item === card));
-  styleName.textContent = styleNames[selectedStyle];
-  renderDocument();
+  chooseStyle(card.dataset.style);
   showToast(`已切换为「${styleNames[selectedStyle]}」设计语言`);
 });
 document.querySelector('#generate').addEventListener('click', async () => {
@@ -172,6 +189,44 @@ document.querySelector('#export').addEventListener('click', async () => {
     const output = await api(`/api/documents/${currentDocumentId}/exports`, { method: 'POST' });
     window.location.assign(output.downloadUrl);
   } catch { showToast('导出暂不可用，请稍后重试'); }
+});
+document.querySelector('#publish-style').addEventListener('click', async () => {
+  try {
+    if (!await requireLogin()) return;
+    if (!currentDocumentId) await saveDocument();
+    if (!currentDocumentId) return;
+    await api(`/api/documents/${currentDocumentId}/styles`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ description: instruction.value }) });
+    showToast('已发布到风格库');
+  } catch (error) { showToast(error.code === 'already_published' ? '这份作品已经发布为风格' : '风格发布失败，请稍后重试'); }
+});
+document.querySelector('#open-style-library').addEventListener('click', async event => {
+  event.preventDefault();
+  document.querySelector('#style-library-dialog').showModal();
+  try { await loadStyleLibrary(); } catch { showToast('风格库暂不可用，请稍后重试'); }
+});
+document.querySelector('#close-style-library').addEventListener('click', () => document.querySelector('#style-library-dialog').close());
+document.querySelector('#style-search-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  try { await loadStyleLibrary(); } catch { showToast('搜索失败，请稍后重试'); }
+});
+document.querySelector('#style-results').addEventListener('click', async event => {
+  const card = event.target.closest('.library-card');
+  if (!card) return;
+  try {
+    if (event.target.closest('.like-style')) {
+      if (!await requireLogin()) return;
+      const result = await api(`/api/styles/${card.dataset.templateId}/like`, { method: 'POST' });
+      card.querySelector('.like-style').textContent = result.liked ? '已喜欢' : '喜欢';
+      card.querySelector('.library-meta span:nth-child(2)').textContent = `♥ ${result.likes}`;
+    }
+    if (event.target.closest('.use-style')) {
+      if (!await requireLogin()) return;
+      const result = await api(`/api/styles/${card.dataset.templateId}/use`, { method: 'POST' });
+      chooseStyle(result.style.style, result.style.title);
+      document.querySelector('#style-library-dialog').close();
+      showToast(`已应用「${result.style.title}」`);
+    }
+  } catch { showToast('操作失败，请稍后重试'); }
 });
 document.querySelector('#close-dialog').addEventListener('click', () => document.querySelector('#share-dialog').close());
 document.querySelector('#copy-link').addEventListener('click', async () => {
