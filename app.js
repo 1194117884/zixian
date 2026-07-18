@@ -7,7 +7,6 @@ const paper = document.querySelector('#paper-wrap');
 const toast = document.querySelector('#toast');
 const authDialog = document.querySelector('#auth-dialog');
 const emailForm = document.querySelector('#email-form');
-const codeForm = document.querySelector('#code-form');
 const authMessage = document.querySelector('#auth-message');
 const paymentDialog = document.querySelector('#payment-dialog');
 const styleNames = { note: 'Apple Notes', board: '手写板书', magazine: '编辑杂志', social: '知识卡片' };
@@ -15,6 +14,8 @@ let selectedStyle = 'note';
 let zoom = 67;
 let currentUser = null;
 let currentDocumentId = null;
+let authStage = 'request';
+let resendTimer = null;
 
 function escapeHtml(value) {
   return value.replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
@@ -67,8 +68,6 @@ async function loadWallet() {
 function openLogin() {
   authMessage.textContent = '';
   authMessage.classList.remove('error');
-  emailForm.hidden = false;
-  codeForm.hidden = true;
   authDialog.showModal();
   document.querySelector('#email').focus();
 }
@@ -76,6 +75,28 @@ function openLogin() {
 function setAuthMessage(message, isError = false) {
   authMessage.textContent = message;
   authMessage.classList.toggle('error', isError);
+}
+
+function startResendCountdown(seconds = 60) {
+  const countdown = document.querySelector('#resend-countdown');
+  const resend = document.querySelector('#resend-code');
+  clearInterval(resendTimer);
+  resend.disabled = true;
+  const render = () => { countdown.textContent = seconds > 0 ? `${seconds}s 后可重发` : '可重发'; };
+  render();
+  resendTimer = setInterval(() => {
+    seconds -= 1;
+    render();
+    if (seconds <= 0) { clearInterval(resendTimer); resend.disabled = false; }
+  }, 1000);
+}
+
+function showCodeStep() {
+  authStage = 'verify';
+  document.querySelector('#code-field').hidden = false;
+  document.querySelector('#auth-submit').textContent = '登录';
+  document.querySelector('#code').focus();
+  startResendCountdown();
 }
 
 async function requireLogin() {
@@ -187,26 +208,32 @@ document.querySelector('#complete-test-payment').addEventListener('click', async
   }
 });
 document.querySelector('#close-auth').addEventListener('click', () => authDialog.close());
-document.querySelector('#change-email').addEventListener('click', () => { codeForm.hidden = true; emailForm.hidden = false; setAuthMessage(''); });
 emailForm.addEventListener('submit', async event => {
   event.preventDefault();
-  const button = document.querySelector('#request-code');
+  const button = document.querySelector('#auth-submit');
   button.disabled = true;
   try {
-    await api('/api/auth/request-code', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: document.querySelector('#email').value }) });
-    emailForm.hidden = true; codeForm.hidden = false; setAuthMessage('验证码已发送，请查收邮箱。'); document.querySelector('#code').focus();
+    if (authStage === 'request') {
+      await api('/api/auth/request-code', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: document.querySelector('#email').value }) });
+      setAuthMessage('验证码已发送，请查收邮箱。'); showCodeStep();
+    } else {
+      const result = await api('/api/auth/verify-code', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: document.querySelector('#email').value, code: document.querySelector('#code').value }) });
+      updateProfile(result.user); await loadWallet(); authDialog.close(); showToast('登录成功，作品会安全保存');
+    }
   } catch (error) {
-    setAuthMessage(error.code === 'rate_limited' ? '请求过于频繁，请稍后再试。' : '无法发送验证码，请检查邮箱与验证。', true);
+    setAuthMessage(authStage === 'request' && error.code === 'rate_limited' ? '请求过于频繁，请稍后再试。' : authStage === 'request' ? '无法发送验证码，请检查邮箱。' : '验证码无效或已过期。', true);
   } finally { button.disabled = false; }
 });
-codeForm.addEventListener('submit', async event => {
-  event.preventDefault();
-  const button = document.querySelector('#verify-code');
-  button.disabled = true;
+document.querySelector('#resend-code').addEventListener('click', async event => {
+  const resend = event.currentTarget;
+  resend.disabled = true;
   try {
-    const result = await api('/api/auth/verify-code', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: document.querySelector('#email').value, code: document.querySelector('#code').value }) });
-    updateProfile(result.user); await loadWallet(); authDialog.close(); showToast('登录成功，作品会安全保存');
-  } catch { setAuthMessage('验证码无效或已过期。', true); } finally { button.disabled = false; }
+    await api('/api/auth/request-code', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: document.querySelector('#email').value }) });
+    setAuthMessage('验证码已重新发送，请查收邮箱。'); startResendCountdown();
+  } catch (error) {
+    setAuthMessage(error.code === 'rate_limited' ? '请求过于频繁，请稍后再试。' : '无法重新发送验证码。', true);
+    resend.disabled = false;
+  }
 });
 document.addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') document.querySelector('#generate').click(); });
 
