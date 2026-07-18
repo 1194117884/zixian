@@ -158,7 +158,7 @@ function chooseStyleReference(style) {
 function renderStyleLibrary(styles) {
   const container = document.querySelector('#style-results');
   if (!styles.length) { container.innerHTML = '<p class="library-empty">还没有公开风格。发布你的第一份作品吧。</p>'; return; }
-  container.innerHTML = styles.map(item => `<article class="library-card" data-template-id="${escapeHtml(item.id)}">${item.previewUrl ? `<img class="library-cover" src="${escapeHtml(item.previewUrl)}" alt="${escapeHtml(item.title)} 示例图">` : ''}<h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.description || `${item.aspectRatio || '自动'} · 来自用户作品的安全设计参考`)}</p><div class="library-meta"><span>${escapeHtml(item.author || '字见用户')}</span><span>♥ ${item.likes}</span><span>↗ ${item.uses}</span></div><div class="library-actions"><button class="like-style" type="button">${item.liked ? '已喜欢' : '喜欢'}</button><button class="use-style" type="button">借用参考</button></div></article>`).join('');
+  container.innerHTML = styles.map(item => `<article class="library-card" data-template-id="${escapeHtml(item.id)}">${item.previewUrl ? `<img class="library-cover" src="${escapeHtml(item.previewUrl)}" alt="${escapeHtml(item.title)} 示例图">` : ''}<h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.description || '来自用户作品的安全设计参考')}</p><div class="library-meta"><span>${escapeHtml(item.author || '字见用户')}</span><span>♥ ${item.likes}</span><span>↗ ${item.uses}</span></div><div class="library-actions"><button class="like-style" type="button">${item.liked ? '已喜欢' : '喜欢'}</button><button class="use-style" type="button">借用参考</button></div></article>`).join('');
 }
 
 async function loadStyleLibrary() {
@@ -273,7 +273,6 @@ document.querySelector('#conversation').addEventListener('click', async event =>
       dialog.dataset.documentId = documentId;
       dialog.dataset.versionId = versionId;
       document.querySelector('#style-title').value = '';
-      document.querySelector('#style-aspect-ratio').value = 'auto';
       dialog.showModal();
     }
   } catch (error) {
@@ -320,7 +319,7 @@ document.querySelector('#publish-style-form').addEventListener('submit', async e
   const button = document.querySelector('#publish-style-submit');
   button.disabled = true;
   try {
-    await api(`/api/documents/${dialog.dataset.documentId}/styles`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ versionId: dialog.dataset.versionId, title: document.querySelector('#style-title').value, aspectRatio: document.querySelector('#style-aspect-ratio').value }) });
+    await api(`/api/documents/${dialog.dataset.documentId}/styles`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ versionId: dialog.dataset.versionId, title: document.querySelector('#style-title').value }) });
     dialog.close();
     showToast('已发布到风格库');
   } catch (error) {
