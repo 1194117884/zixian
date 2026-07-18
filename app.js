@@ -2,7 +2,6 @@ const content = document.querySelector('#content');
 const instruction = document.querySelector('#instruction');
 const count = document.querySelector('#count');
 const preview = document.querySelector('#preview');
-const paper = document.querySelector('#paper-wrap');
 const toast = document.querySelector('#toast');
 const authDialog = document.querySelector('#auth-dialog');
 const emailForm = document.querySelector('#email-form');
@@ -10,7 +9,6 @@ const authMessage = document.querySelector('#auth-message');
 const paymentDialog = document.querySelector('#payment-dialog');
 const styleNames = { note: 'Apple Notes', board: '手写板书', magazine: '编辑杂志', social: '知识卡片' };
 let selectedStyle = 'note';
-let zoom = 67;
 let currentUser = null;
 let currentDocumentId = null;
 let authStage = 'request';
@@ -57,14 +55,23 @@ function addConversationMessage(role, text) {
     : `<span>字见</span><p>${escapeHtml(text)}</p>`;
   conversation.append(message);
   conversation.scrollTop = conversation.scrollHeight;
+  return message;
+}
+
+function addPreviewToMessage(message) {
+  const bubble = document.createElement('div');
+  bubble.className = 'document-bubble';
+  const iframe = document.createElement('iframe');
+  iframe.title = `第 ${versionCount} 版作品预览`;
+  iframe.sandbox = '';
+  iframe.srcdoc = preview.srcdoc;
+  bubble.append(iframe);
+  message.append(bubble);
 }
 
 function showGeneratedDocument() {
   hasGenerated = true;
   versionCount += 1;
-  document.querySelector('#paper-wrap').hidden = false;
-  document.querySelector('#preview-empty').hidden = true;
-  document.querySelector('#preview-status').innerHTML = '<i></i> 第 ' + versionCount + ' 版已生成';
   document.querySelector('#source-content').hidden = true;
   document.querySelector('#prompt-label').textContent = '继续修改';
   document.querySelector('#instruction').placeholder = '例如：标题更有力量，正文更精简，结尾更克制。';
@@ -75,9 +82,6 @@ function resetCreation() {
   hasGenerated = false;
   versionCount = 0;
   currentDocumentId = null;
-  document.querySelector('#paper-wrap').hidden = true;
-  document.querySelector('#preview-empty').hidden = false;
-  document.querySelector('#preview-status').textContent = '等待生成';
   document.querySelector('#source-content').hidden = false;
   document.querySelector('#conversation').replaceChildren();
   document.querySelector('#conversation').hidden = true;
@@ -211,6 +215,7 @@ document.querySelector('#generate').addEventListener('click', async () => {
   if (hasGenerated && !instruction.value.trim()) return showToast('告诉我这一版还想怎样调整');
   const button = document.querySelector('#generate');
   button.disabled = true;
+  const initialGeneration = !hasGenerated;
   const direction = instruction.value.trim();
   button.textContent = hasGenerated ? '正在修改…' : '正在生成…';
   if (hasGenerated && direction) addConversationMessage('user', direction);
@@ -225,7 +230,9 @@ document.querySelector('#generate').addEventListener('click', async () => {
     currentDocumentId = result.document.id;
     renderDocument();
     showGeneratedDocument();
-    addConversationMessage('assistant', `第 ${versionCount} 版已完成。你可以继续告诉我想调整的内容。`);
+    if (initialGeneration) addConversationMessage('user', direction || '请将这段内容制作为可分享的视觉作品。');
+    const responseMessage = addConversationMessage('assistant', `第 ${versionCount} 版已完成。你可以继续告诉我想调整的内容。`);
+    addPreviewToMessage(responseMessage);
     instruction.value = '';
     await loadWallet();
     showToast('作品已生成并安全保存');
@@ -307,8 +314,6 @@ document.querySelector('#copy-link').addEventListener('click', async () => {
 document.querySelector('#new-work').addEventListener('click', () => {
   content.value = ''; instruction.value = ''; count.textContent = '0'; resetCreation(); renderDocument(); content.focus(); showToast('已新建空白作品');
 });
-document.querySelector('#zoom-in').addEventListener('click', () => { zoom = Math.min(100, zoom + 11); paper.style.transform = `scale(${zoom / 67})`; document.querySelector('#zoom').textContent = `${zoom}%`; });
-document.querySelector('#zoom-out').addEventListener('click', () => { zoom = Math.max(45, zoom - 11); paper.style.transform = `scale(${zoom / 67})`; document.querySelector('#zoom').textContent = `${zoom}%`; });
 document.querySelector('#login').addEventListener('click', () => currentUser ? api('/api/auth/logout', { method: 'POST' }).then(() => { updateProfile(null); currentDocumentId = null; showToast('已登出'); }) : openLogin());
 document.querySelector('#buy-credits').addEventListener('click', async () => {
   if (!await requireLogin()) return;
