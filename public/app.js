@@ -172,6 +172,34 @@ function renderStyleRail(styles) {
   rail.innerHTML = `<button class="style-picker-card blank${blankSelected ? ' selected' : ''}" type="button" data-style-picker="blank"><span class="style-picker-preview">＋</span><b>空白</b><small>从自己的想法开始</small></button>${styles.map(item => `<button class="style-picker-card${item.id === selectedStyleTemplateId ? ' selected' : ''}" type="button" data-style-picker="${escapeHtml(item.id)}">${item.previewUrl ? `<img class="style-picker-preview" src="${escapeHtml(item.previewUrl)}" alt="">` : '<span class="style-picker-preview">字见</span>'}<b>${escapeHtml(item.title)}</b><small>↗ ${item.uses}　♥ ${item.likes}</small></button>`).join('')}<button class="style-picker-card more" type="button" data-style-picker="more"><span class="style-picker-preview">⌁</span><b>搜索更多</b><small>查找全部风格</small></button>`;
 }
 
+function renderDocuments(documents) {
+  const container = document.querySelector('#documents-results');
+  if (!documents.length) { container.innerHTML = '<p class="library-empty">还没有保存的作品。先完成你的第一份创作吧。</p>'; return; }
+  container.innerHTML = documents.map(item => `<button class="document-list-item" type="button" data-document-id="${escapeHtml(item.id)}"><span><b>${escapeHtml(item.title)}</b><small>${item.status === 'published' ? '已发布' : '草稿'} · ${item.versionCount} 个版本</small></span><time>${escapeHtml(item.updatedAt)}</time></button>`).join('');
+}
+
+async function loadDocuments() {
+  const result = await api('/api/documents');
+  renderDocuments(result.documents);
+}
+
+function openDocument(work, version) {
+  resetCreation();
+  currentDocumentId = work.id;
+  selectedDesign = version.design || selectedDesign;
+  content.value = version.content;
+  count.textContent = content.value.length;
+  hasGenerated = true;
+  versionCount = Number(work.versionCount);
+  document.querySelector('#source-content').hidden = true;
+  document.querySelector('#prompt-label').textContent = '继续修改';
+  document.querySelector('#instruction').placeholder = '例如：标题更有力量，正文更精简，结尾更克制。';
+  document.querySelector('#generate-hint').textContent = '⌘ Enter 修改';
+  renderDocument();
+  const message = addConversationMessage('assistant', `已打开「${work.title}」的当前版本。你可以继续告诉我想调整的内容。`);
+  addPreviewToMessage(message, { id: work.id, versionId: version.id });
+}
+
 async function loadStyleRail() {
   const response = await api('/api/styles?limit=20');
   styleRailStyles = response.styles;
@@ -326,6 +354,23 @@ document.querySelectorAll('.open-style-library').forEach(button => button.addEve
   document.querySelector('#style-library-dialog').showModal();
   try { await loadStyleLibrary(); } catch { showToast('风格库暂不可用，请稍后重试'); }
 }));
+document.querySelector('#my-documents').addEventListener('click', async event => {
+  event.preventDefault();
+  if (!await requireLogin()) return;
+  document.querySelector('#documents-dialog').showModal();
+  try { await loadDocuments(); } catch { showToast('作品列表暂不可用，请稍后重试'); }
+});
+document.querySelector('#close-documents').addEventListener('click', () => document.querySelector('#documents-dialog').close());
+document.querySelector('#documents-results').addEventListener('click', async event => {
+  const item = event.target.closest('[data-document-id]');
+  if (!item) return;
+  try {
+    const result = await api(`/api/documents/${item.dataset.documentId}`);
+    document.querySelector('#documents-dialog').close();
+    openDocument(result.document, result.version);
+    showToast('已打开作品');
+  } catch { showToast('无法打开这份作品，请稍后重试'); }
+});
 document.querySelector('#close-style-library').addEventListener('click', () => document.querySelector('#style-library-dialog').close());
 document.querySelector('#style-search-form').addEventListener('submit', async event => {
   event.preventDefault();

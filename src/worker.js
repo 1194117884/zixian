@@ -76,6 +76,23 @@ async function createDocument(request, env) {
   return json(await createDocumentForOwner({ ownerId, payload, env }), { status: 201 });
 }
 
+async function listDocuments(request, env) {
+  const ownerId = await sessionUserId(request, env);
+  if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
+  const result = await env.DB.prepare(`SELECT d.id, d.title, d.status, d.current_version_id AS currentVersionId, d.updated_at AS updatedAt, COUNT(v.id) AS versionCount FROM documents d LEFT JOIN document_versions v ON v.document_id = d.id WHERE d.owner_id = ? GROUP BY d.id ORDER BY d.updated_at DESC LIMIT 50`).bind(ownerId).all();
+  return json({ documents: result.results || [] });
+}
+
+async function getDocument(request, env, documentId) {
+  const ownerId = await sessionUserId(request, env);
+  if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
+  const document = await env.DB.prepare('SELECT id, title, status, current_version_id AS currentVersionId, updated_at AS updatedAt, (SELECT COUNT(*) FROM document_versions v WHERE v.document_id = documents.id) AS versionCount FROM documents WHERE id = ? AND owner_id = ?').bind(documentId, ownerId).first();
+  if (!document) return json({ error: 'not_found' }, { status: 404 });
+  const version = await env.DB.prepare('SELECT id, content_json AS contentJson, created_at AS createdAt FROM document_versions WHERE id = ? AND document_id = ? AND safety_status = ?').bind(document.currentVersionId, document.id, 'approved').first();
+  if (!version) return json({ error: 'not_found' }, { status: 404 });
+  return json({ document, version: { id: version.id, ...JSON.parse(version.contentJson), createdAt: version.createdAt } });
+}
+
 async function publishDocument(request, env, documentId) {
   const ownerId = await sessionUserId(request, env);
   if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
@@ -376,6 +393,10 @@ export default {
     if (request.method === 'POST' && url.pathname === '/api/generation-jobs') return createGenerationJob(request, env);
 
     if (request.method === 'POST' && url.pathname === '/api/documents') return createDocument(request, env);
+    if (request.method === 'GET' && url.pathname === '/api/documents') return listDocuments(request, env);
+
+    const documentMatch = url.pathname.match(/^\/api\/documents\/([^/]+)$/);
+    if (request.method === 'GET' && documentMatch) return getDocument(request, env, documentMatch[1]);
 
     const publishMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/publish$/);
     if (request.method === 'POST' && publishMatch) return publishDocument(request, env, publishMatch[1]);

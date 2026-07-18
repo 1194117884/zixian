@@ -14,7 +14,7 @@
         <button class="new-work" id="new-work"><span>+</span> 新建作品 <kbd>⌘ K</kbd></button>
         <nav>
           <a class="active" href="#"><span>✦</span> 创作</a>
-          <a href="#"><span>◫</span> 我的作品</a>
+          <a href="#" id="my-documents"><span>◫</span> 我的作品</a>
           <a href="#" class="open-style-library"><span>⌁</span> 风格库</a>
           <a href="#"><span>♧</span> 已发布</a>
         </nav>
@@ -45,6 +45,7 @@
     </main>
     <div class="toast" id="toast" role="status"></div>
     <dialog id="style-library-dialog" class="style-library"><button class="dialog-close" id="close-style-library">×</button><p class="eyebrow">社区设计语言</p><h2>风格库</h2><p>每个风格都来自已审核的安全作品，可直接应用到你的内容。</p><form id="style-search-form" class="style-search"><input id="style-search" placeholder="搜索风格、关键词或作者"><button class="dark" type="submit">搜索</button></form><div id="style-results" class="style-results"></div></dialog>
+    <dialog id="documents-dialog" class="documents-dialog"><button class="dialog-close" id="close-documents">×</button><p class="eyebrow">你的创作空间</p><h2>我的作品</h2><p>打开一份作品，继续在它的最新版本上修改。</p><div id="documents-results" class="documents-results"></div></dialog>
     <dialog id="share-dialog"><button class="dialog-close" id="close-dialog">×</button><p class="eyebrow">已发布为只读网页</p><h2>你的作品已准备好分享</h2><p>此链接指向一个固定、安全的 HTML 快照。</p><div class="share-url"><code>m7k2q.zixian.page</code><button id="copy-link">复制</button></div><small>原始内容与创作记录不会暴露给访问者。</small></dialog>
     <dialog id="publish-style-dialog"><button class="dialog-close" id="close-publish-style">×</button><p class="eyebrow">发布你的设计语言</p><h2>发布为风格</h2><p>会为此版本生成一张公开示例图；已有高清图时将直接复用，不消耗积分。</p><form id="publish-style-form" class="style-publish-form"><label>风格标题<input id="style-title" maxlength="80" placeholder="例如：克制的黑白笔记" required></label><button class="dark" type="submit" id="publish-style-submit">确认发布</button></form></dialog>
     <dialog id="auth-dialog"><button class="dialog-close" id="close-auth">×</button><p class="eyebrow">安全登录</p><h2>登录字见</h2><p>输入邮箱，我们会发送一次性验证码。无需密码。</p><form id="email-form" class="auth-form"><label>邮箱<input id="email" type="email" autocomplete="email" placeholder="you@example.com" required></label><label id="code-field" hidden>6 位验证码<span><input id="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="123456"><small id="resend-countdown">60s 后可重发</small><button class="text-button" type="button" id="resend-code" disabled aria-label="重新发送验证码">↻</button></span></label><button class="dark" type="submit" id="auth-submit">发送验证码</button></form><p class="auth-message" id="auth-message" aria-live="polite"></p></dialog>
