@@ -7,7 +7,8 @@
     "test": "node --test",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:migrate": "wrangler d1 migrations apply zixian-db --remote"
+    "db:migrate": "wrangler d1 migrations apply zixian-db --remote",
+    "db:migrate:local": "wrangler d1 migrations apply zixian-db --local"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
