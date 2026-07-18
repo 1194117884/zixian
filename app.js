@@ -94,6 +94,7 @@ function startResendCountdown(seconds = 60) {
 function showCodeStep() {
   authStage = 'verify';
   document.querySelector('#code-field').hidden = false;
+  document.querySelector('#code').required = true;
   document.querySelector('#auth-submit').textContent = '登录';
   document.querySelector('#code').focus();
   startResendCountdown();
