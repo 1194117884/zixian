@@ -17,7 +17,8 @@
     }
   ],
   "browser": {
-    "binding": "BROWSER"
+    "binding": "BROWSER",
+    "remote": true
   },
   "assets": {
     "directory": "public",

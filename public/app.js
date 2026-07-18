@@ -396,7 +396,7 @@ document.querySelector('#conversation').addEventListener('click', async event =>
       dialog.showModal();
     }
   } catch (error) {
-    const message = button.dataset.outputAction === 'share' ? '发布失败，请稍后重试' : button.dataset.outputAction === 'export' ? '导出暂不可用，请稍后重试' : error.code === 'already_published' ? '这份作品已经发布为风格' : '风格发布失败，请稍后重试';
+    const message = button.dataset.outputAction === 'share' ? '发布失败，请稍后重试' : button.dataset.outputAction === 'export' ? '截图服务暂不可用，请确认本地开发服务已重启' : error.code === 'already_published' ? '这份作品已经发布为风格' : error.code === 'render_unavailable' ? '截图服务暂不可用，请确认本地开发服务已重启' : '风格发布失败，请稍后重试';
     showToast(message);
   } finally {
     button.disabled = false;
