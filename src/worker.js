@@ -148,10 +148,12 @@ async function publishStyleTemplate(request, env, documentId) {
 async function listStyleTemplates(request, env) {
   const url = new URL(request.url);
   const query = (url.searchParams.get('q') || '').trim().slice(0, 80);
+  const requestedLimit = Number.parseInt(url.searchParams.get('limit') || '', 10);
+  const limit = Math.min(Math.max(Number.isFinite(requestedLimit) ? requestedLimit : query ? 50 : 20, 1), 50);
   const viewerId = await sessionUserId(request, env);
   const filter = query ? 'WHERE t.title LIKE ? OR t.description LIKE ?' : '';
   const params = query ? [viewerId || '', `%${query}%`, `%${query}%`] : [viewerId || ''];
-  const result = await env.DB.prepare(`SELECT t.id, t.title, t.description, t.style_key AS style, t.preview_object_key AS previewObjectKey, t.likes_count AS likes, t.uses_count AS uses, t.created_at, u.email AS author, EXISTS(SELECT 1 FROM style_template_likes l WHERE l.template_id = t.id AND l.user_id = ?) AS liked FROM style_templates t LEFT JOIN users u ON u.id = t.owner_id ${filter} ORDER BY t.uses_count DESC, t.likes_count DESC, t.created_at DESC LIMIT 50`).bind(...params).all();
+  const result = await env.DB.prepare(`SELECT t.id, t.title, t.description, t.style_key AS style, t.preview_object_key AS previewObjectKey, t.likes_count AS likes, t.uses_count AS uses, t.created_at, u.email AS author, EXISTS(SELECT 1 FROM style_template_likes l WHERE l.template_id = t.id AND l.user_id = ?) AS liked FROM style_templates t LEFT JOIN users u ON u.id = t.owner_id ${filter} ORDER BY (t.uses_count + t.likes_count) DESC, t.uses_count DESC, t.created_at DESC LIMIT ${limit}`).bind(...params).all();
   return json({ styles: (result.results || []).map(style => ({ ...style, previewUrl: style.previewObjectKey ? `/api/styles/${style.id}/preview` : null })) });
 }
 

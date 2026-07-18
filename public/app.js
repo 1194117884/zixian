@@ -18,6 +18,7 @@ let availableModels = [];
 let hasGenerated = false;
 let versionCount = 0;
 let conversationHistory = [];
+let styleRailStyles = [];
 
 function escapeHtml(value) {
   return value.replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
@@ -86,6 +87,7 @@ function resetCreation() {
   selectedStyleTemplateId = null;
   selectedDesign = { background:'#fffefb', foreground:'#1d1d1b', accent:'#1d1d1b', label:'ZIXIAN / DRAFT' };
   document.querySelector('#style-reference').textContent = '未引用风格 · 本次作品将创建自己的设计';
+  renderStyleRail(styleRailStyles);
   conversationHistory = [];
   currentDocumentId = null;
   document.querySelector('#source-content').hidden = false;
@@ -152,7 +154,28 @@ function chooseStyleReference(style) {
   selectedStyleTemplateId = style.id;
   selectedDesign = style.design;
   document.querySelector('#style-reference').textContent = `引用「${style.title}」作为灵感 · 生成结果仍是你的独立设计`;
+  renderStyleRail(styleRailStyles);
   if (!hasGenerated) renderDocument();
+}
+
+function chooseBlankCanvas() {
+  selectedStyleTemplateId = null;
+  selectedDesign = { background:'#fffefb', foreground:'#1d1d1b', accent:'#1d1d1b', label:'ZIXIAN / DRAFT' };
+  document.querySelector('#style-reference').textContent = '未引用风格 · 本次作品将创建自己的设计';
+  renderStyleRail(styleRailStyles);
+  if (!hasGenerated) renderDocument();
+}
+
+function renderStyleRail(styles) {
+  const rail = document.querySelector('#style-rail');
+  const blankSelected = !selectedStyleTemplateId;
+  rail.innerHTML = `<button class="style-picker-card blank${blankSelected ? ' selected' : ''}" type="button" data-style-picker="blank"><span class="style-picker-preview">＋</span><b>空白</b><small>从自己的想法开始</small></button>${styles.map(item => `<button class="style-picker-card${item.id === selectedStyleTemplateId ? ' selected' : ''}" type="button" data-style-picker="${escapeHtml(item.id)}">${item.previewUrl ? `<img class="style-picker-preview" src="${escapeHtml(item.previewUrl)}" alt="">` : '<span class="style-picker-preview">字见</span>'}<b>${escapeHtml(item.title)}</b><small>↗ ${item.uses}　♥ ${item.likes}</small></button>`).join('')}<button class="style-picker-card more" type="button" data-style-picker="more"><span class="style-picker-preview">⌁</span><b>搜索更多</b><small>查找全部风格</small></button>`;
+}
+
+async function loadStyleRail() {
+  const response = await api('/api/styles?limit=20');
+  styleRailStyles = response.styles;
+  renderStyleRail(styleRailStyles);
 }
 
 function renderStyleLibrary(styles) {
@@ -163,7 +186,7 @@ function renderStyleLibrary(styles) {
 
 async function loadStyleLibrary() {
   const query = document.querySelector('#style-search').value.trim();
-  const response = await api(`/api/styles${query ? `?q=${encodeURIComponent(query)}` : ''}`);
+  const response = await api(`/api/styles?limit=50${query ? `&q=${encodeURIComponent(query)}` : ''}`);
   renderStyleLibrary(response.styles);
 }
 
@@ -251,6 +274,22 @@ document.querySelector('#model-options').addEventListener('click', event => {
   renderModelOptions(availableModels);
 });
 document.querySelector('#clear-instruction').addEventListener('click', () => { instruction.value = ''; instruction.focus(); });
+document.querySelector('#style-rail').addEventListener('click', async event => {
+  const card = event.target.closest('[data-style-picker]');
+  if (!card) return;
+  if (card.dataset.stylePicker === 'more') {
+    document.querySelector('#style-library-dialog').showModal();
+    try { await loadStyleLibrary(); } catch { showToast('风格库暂不可用，请稍后重试'); }
+    return;
+  }
+  if (card.dataset.stylePicker === 'blank') return chooseBlankCanvas();
+  try {
+    if (!await requireLogin()) return;
+    const result = await api(`/api/styles/${card.dataset.stylePicker}/use`, { method: 'POST' });
+    chooseStyleReference(result.style);
+    if (result.firstUse) loadStyleRail().catch(() => undefined);
+  } catch { showToast('套用风格失败，请稍后重试'); }
+});
 document.querySelector('#conversation').addEventListener('click', async event => {
   const button = event.target.closest('[data-output-action]');
   if (!button) return;
@@ -307,6 +346,7 @@ document.querySelector('#style-results').addEventListener('click', async event =
       const result = await api(`/api/styles/${card.dataset.templateId}/use`, { method: 'POST' });
       chooseStyleReference(result.style);
       document.querySelector('#style-library-dialog').close();
+      loadStyleRail().catch(() => undefined);
       showToast(`已应用「${result.style.title}」`);
     }
   } catch { showToast('操作失败，请稍后重试'); }
@@ -392,3 +432,4 @@ document.addEventListener('keydown', event => { if ((event.metaKey || event.ctrl
 
 api('/api/auth/me').then(async result => { updateProfile(result.user); await loadWallet(); }).catch(() => updateProfile(null));
 loadModels().catch(() => renderModelOptions([]));
+loadStyleRail().catch(() => renderStyleRail([]));
