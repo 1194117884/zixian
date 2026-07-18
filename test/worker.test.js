@@ -3,7 +3,7 @@ import test from 'node:test';
 import worker from '../src/worker.js';
 import { createSafeDocument } from '../src/safe-document.js';
 import { createCompositionPrompt, generateComposition, getModel, parseComposition, systemPrompt } from '../src/models.js';
-import { exportObjectKey, renderHtmlToPng } from '../src/export.js';
+import { exportObjectKey, renderHtmlToPng, stylePreviewObjectKey } from '../src/export.js';
 import { hashSecret, normalizeEmail, validEmail } from '../src/auth.js';
 import { grantTestCredits } from '../src/payments.js';
 import { refundGenerationCredits } from '../src/credits.js';
@@ -92,6 +92,7 @@ test('export uses a fixed R2 key and stores Browser Run PNG output', async () =>
   } };
 
   assert.equal(exportObjectKey({ documentId: 'd1', versionId: 'v1', exportId: 'e1' }), 'documents/d1/versions/v1/exports/e1.png');
+  assert.equal(stylePreviewObjectKey({ templateId: 's1' }), 'style-templates/s1/preview.png');
   assert.equal(await new Response(await renderHtmlToPng(browser, '<h1>视觉作品</h1>')).text(), 'png-bytes');
 });
 

@@ -2,7 +2,7 @@ import { createSafeDocument, normalizeDesign } from './safe-document.js';
 import { generateComposition, modelCatalog } from './models.js';
 import { refundGenerationCredits, reserveGenerationCredits } from './credits.js';
 import { grantTestCredits } from './payments.js';
-import { exportObjectKey, renderHtmlToPng } from './export.js';
+import { exportObjectKey, renderHtmlToPng, stylePreviewObjectKey } from './export.js';
 import { clearSessionCookie, createCode, createSession, hashSecret, normalizeEmail, sendCodeEmail, sessionCookie, sessionUserId, validEmail } from './auth.js';
 
 const json = (body, init = {}) => new Response(JSON.stringify(body), {
@@ -28,10 +28,21 @@ function validDocumentPayload(payload) {
   return payload && typeof payload.content === 'string' && payload.content.trim() && payload.content.length <= 10000;
 }
 
-function styleTemplatePayload(payload, fallbackTitle) {
-  const title = typeof payload?.title === 'string' && payload.title.trim() ? payload.title.trim().slice(0, 80) : fallbackTitle;
+function styleTemplatePayload(payload) {
+  const title = typeof payload?.title === 'string' ? payload.title.trim().slice(0, 80) : '';
   const description = typeof payload?.description === 'string' ? payload.description.trim().slice(0, 240) : '';
-  return { title, description };
+  const aspectRatio = ['auto', '1:1', '3:4', '9:16', '16:9'].includes(payload?.aspectRatio) ? payload.aspectRatio : 'auto';
+  return { title, description, aspectRatio };
+}
+
+function autoAspectRatio(content) {
+  if (content.length <= 220) return '1:1';
+  if (content.length <= 500) return '3:4';
+  return '9:16';
+}
+
+function viewportForAspectRatio(aspectRatio) {
+  return ({ '1:1': { width: 1080, height: 1080 }, '3:4': { width: 1080, height: 1440 }, '9:16': { width: 1080, height: 1920 }, '16:9': { width: 1600, height: 900 } })[aspectRatio];
 }
 
 async function createDocumentForOwner({ ownerId, payload, env }) {
@@ -117,16 +128,34 @@ async function publishStyleTemplate(request, env, documentId) {
   const document = await env.DB.prepare('SELECT id, title, current_version_id FROM documents WHERE id = ? AND owner_id = ?').bind(documentId, ownerId).first();
   if (!document) return json({ error: 'not_found' }, { status: 404 });
   const versionId = typeof payload?.versionId === 'string' ? payload.versionId : document.current_version_id;
-  const version = await env.DB.prepare('SELECT id, content_json, safety_status FROM document_versions WHERE id = ? AND document_id = ?').bind(versionId, document.id).first();
+  const version = await env.DB.prepare('SELECT id, content_json, html_object_key, safety_status FROM document_versions WHERE id = ? AND document_id = ?').bind(versionId, document.id).first();
   if (!version || version.safety_status !== 'approved') return json({ error: 'not_publishable' }, { status: 409 });
-  const template = styleTemplatePayload(payload, document.title);
+  const template = styleTemplatePayload(payload);
+  if (!template.title) return badRequest('style title is required');
+  const existing = await env.DB.prepare('SELECT id FROM style_templates WHERE source_document_id = ? AND source_version_id = ?').bind(document.id, version.id).first();
+  if (existing) return json({ error: 'already_published' }, { status: 409 });
   const templateId = id();
+  const source = JSON.parse(version.content_json);
+  const aspectRatio = template.aspectRatio === 'auto' ? autoAspectRatio(source.content || '') : template.aspectRatio;
+  const exportRecord = await env.DB.prepare('SELECT object_key FROM exports WHERE document_id = ? AND version_id = ? ORDER BY created_at DESC LIMIT 1').bind(document.id, version.id).first();
+  let previewObjectKey = exportRecord?.object_key;
+  if (!previewObjectKey) {
+    const sourceObject = await env.ASSETS.get(version.html_object_key);
+    if (!sourceObject) return json({ error: 'not_found' }, { status: 404 });
+    try {
+      previewObjectKey = stylePreviewObjectKey({ templateId });
+      const png = await renderHtmlToPng(env.BROWSER, await sourceObject.text(), viewportForAspectRatio(aspectRatio));
+      await env.ASSETS.put(previewObjectKey, png, { httpMetadata: { contentType: 'image/png' } });
+    } catch (error) {
+      return json({ error: error.message === 'render_failed' ? 'render_failed' : 'render_unavailable' }, { status: 503 });
+    }
+  }
   try {
-    await env.DB.prepare('INSERT INTO style_templates (id, owner_id, source_document_id, source_version_id, title, description, style_key) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(templateId, ownerId, document.id, version.id, template.title, template.description, 'document-reference').run();
+    await env.DB.prepare('INSERT INTO style_templates (id, owner_id, source_document_id, source_version_id, title, description, style_key, aspect_ratio, preview_object_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(templateId, ownerId, document.id, version.id, template.title, template.description, 'document-reference', aspectRatio, previewObjectKey).run();
   } catch {
     return json({ error: 'already_published' }, { status: 409 });
   }
-  return json({ id: templateId, ...template, likes: 0, uses: 0 }, { status: 201 });
+  return json({ id: templateId, ...template, aspectRatio, previewUrl: `/api/styles/${templateId}/preview`, likes: 0, uses: 0 }, { status: 201 });
 }
 
 async function listStyleTemplates(request, env) {
@@ -135,8 +164,16 @@ async function listStyleTemplates(request, env) {
   const viewerId = await sessionUserId(request, env);
   const filter = query ? 'WHERE t.title LIKE ? OR t.description LIKE ?' : '';
   const params = query ? [viewerId || '', `%${query}%`, `%${query}%`] : [viewerId || ''];
-  const result = await env.DB.prepare(`SELECT t.id, t.title, t.description, t.style_key AS style, t.likes_count AS likes, t.uses_count AS uses, t.created_at, u.email AS author, EXISTS(SELECT 1 FROM style_template_likes l WHERE l.template_id = t.id AND l.user_id = ?) AS liked FROM style_templates t LEFT JOIN users u ON u.id = t.owner_id ${filter} ORDER BY t.uses_count DESC, t.likes_count DESC, t.created_at DESC LIMIT 50`).bind(...params).all();
-  return json({ styles: result.results || [] });
+  const result = await env.DB.prepare(`SELECT t.id, t.title, t.description, t.style_key AS style, t.aspect_ratio AS aspectRatio, t.preview_object_key AS previewObjectKey, t.likes_count AS likes, t.uses_count AS uses, t.created_at, u.email AS author, EXISTS(SELECT 1 FROM style_template_likes l WHERE l.template_id = t.id AND l.user_id = ?) AS liked FROM style_templates t LEFT JOIN users u ON u.id = t.owner_id ${filter} ORDER BY t.uses_count DESC, t.likes_count DESC, t.created_at DESC LIMIT 50`).bind(...params).all();
+  return json({ styles: (result.results || []).map(style => ({ ...style, previewUrl: style.previewObjectKey ? `/api/styles/${style.id}/preview` : null })) });
+}
+
+async function serveStylePreview(env, templateId) {
+  const template = await env.DB.prepare('SELECT preview_object_key FROM style_templates WHERE id = ?').bind(templateId).first();
+  if (!template?.preview_object_key) return new Response('Not found', { status: 404 });
+  const object = await env.ASSETS.get(template.preview_object_key);
+  if (!object) return new Response('Not found', { status: 404 });
+  return new Response(object.body, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=31536000, immutable', 'x-content-type-options': 'nosniff' } });
 }
 
 async function toggleStyleLike(request, env, templateId) {
@@ -358,6 +395,9 @@ export default {
     if (request.method === 'POST' && publishStyleMatch) return publishStyleTemplate(request, env, publishStyleMatch[1]);
 
     if (request.method === 'GET' && url.pathname === '/api/styles') return listStyleTemplates(request, env);
+
+    const stylePreviewMatch = url.pathname.match(/^\/api\/styles\/([^/]+)\/preview$/);
+    if (request.method === 'GET' && stylePreviewMatch) return serveStylePreview(env, stylePreviewMatch[1]);
 
     const likeStyleMatch = url.pathname.match(/^\/api\/styles\/([^/]+)\/like$/);
     if (request.method === 'POST' && likeStyleMatch) return toggleStyleLike(request, env, likeStyleMatch[1]);
