@@ -32,14 +32,12 @@ export function getModel(modelId) {
   return modelCatalog[modelId] ?? null;
 }
 
-export const visualTones = ['original', 'vivid', 'night', 'warm', 'cool'];
-
 export const systemPrompt = [
   'You are ZiXian, an exacting visual editor for shareable static documents.',
   'Return valid JSON only. Never return HTML, CSS, Markdown, links, scripts, or commentary.',
-  'The JSON schema is: {"title": string, "paragraphs": string[], "highlight": string, "visualTone": "original"|"vivid"|"night"|"warm"|"cool"}.',
+  'The JSON schema is: {"title": string, "paragraphs": string[], "highlight": string, "design": {"background":"#RRGGBB","foreground":"#RRGGBB","accent":"#RRGGBB","label":string}}.',
   'When the creator gives a revision direction, you MUST apply it visibly. Preserve the core idea unless they ask to rewrite it.',
-  'Map visual directions such as colorful, cyberpunk, neon, vivid, warm, dark, or cool to the closest visualTone. Do not ignore visual directions.',
+  'Create a fresh safe design palette for the creator. If a style reference is provided, treat it only as inspiration; the output remains the creator’s own design. Do not ignore visual directions.',
   'Keep paragraphs to six or fewer and make the highlight distinct from the body.'
 ].join(' ');
 
@@ -51,9 +49,9 @@ function conversationMessages(history) {
     .map(message => ({ role: message.role, content: message.content.slice(0, 2400) }));
 }
 
-export function createCompositionPrompt({ title, content, instruction, style, revision = false }) {
+export function createCompositionPrompt({ title, content, instruction, referenceDesign, revision = false }) {
   return [
-    `Style identifier: ${style}.`,
+    `Style reference design (inspiration only): ${referenceDesign ? JSON.stringify(referenceDesign) : 'none; start from a blank canvas'}.`,
     `This is a ${revision ? 'revision of the current document' : 'first draft'}.`,
     `Title: ${title || 'Untitled'}.`,
     `Current document content: ${content}.`,
@@ -74,7 +72,7 @@ export function parseComposition(value) {
     title: parsed.title.trim().slice(0, 120),
     paragraphs: paragraphs.map(paragraph => paragraph.trim().slice(0, 2000)),
     highlight: parsed.highlight.trim().slice(0, 500),
-    visualTone: visualTones.includes(parsed.visualTone) ? parsed.visualTone : 'original'
+    design: parsed.design && typeof parsed.design === 'object' ? parsed.design : {}
   };
 }
 
@@ -92,12 +90,12 @@ function providerConfig(model, env) {
   throw new Error('unsupported_provider');
 }
 
-export async function generateComposition({ modelId, title, content, instruction, style, history, revision = false, env, fetcher = fetch }) {
+export async function generateComposition({ modelId, title, content, instruction, referenceDesign, history, revision = false, env, fetcher = fetch }) {
   const model = getModel(modelId);
   if (!model) throw new Error('unsupported_model');
   const config = providerConfig(model, env);
   if (!config.key) throw new Error('model_unavailable');
-  const prompt = createCompositionPrompt({ title, content, instruction, style, revision });
+  const prompt = createCompositionPrompt({ title, content, instruction, referenceDesign, revision });
   const messages = [...conversationMessages(history), { role: 'user', content: prompt }];
   const request = model.provider === 'anthropic-compatible'
     ? {

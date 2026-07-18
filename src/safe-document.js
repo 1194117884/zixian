@@ -1,19 +1,14 @@
-const themes = {
-  note: { background: '#f8e96a', foreground: '#312f19', accent: '#fff9a8', label: 'NOTES' },
-  board: { background: '#ece1d3', foreground: '#2b2926', accent: '#d95242', label: '观点板书' },
-  magazine: { background: '#f5f2eb', foreground: '#1c1b19', accent: '#1c1b19', label: 'JIAN / 04' },
-  social: { background: '#c6d9cc', foreground: '#16362b', accent: '#f4ec75', label: 'IDEA CARD' }
-};
+const blankDesign = { background: '#fffefb', foreground: '#1d1d1b', accent: '#1d1d1b', label: 'ZIXIAN / DRAFT' };
+const color = value => typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value) ? value : null;
 
-const toneOverrides = {
-  original: {},
-  vivid: { background: '#3b146f', foreground: '#fff8ff', accent: '#58f4dc', label: 'VIVID / ZIXIAN' },
-  night: { background: '#13162a', foreground: '#eff2ff', accent: '#8c9eff', label: 'NIGHT / ZIXIAN' },
-  warm: { background: '#f7d9bc', foreground: '#48251e', accent: '#ef6a4a', label: 'WARM / ZIXIAN' },
-  cool: { background: '#cfe5ef', foreground: '#173847', accent: '#247c9d', label: 'COOL / ZIXIAN' }
-};
-
-export const supportedStyles = Object.keys(themes);
+export function normalizeDesign(value) {
+  return {
+    background: color(value?.background) || blankDesign.background,
+    foreground: color(value?.foreground) || blankDesign.foreground,
+    accent: color(value?.accent) || blankDesign.accent,
+    label: typeof value?.label === 'string' && value.label.trim() ? value.label.trim().slice(0, 48) : blankDesign.label
+  };
+}
 
 export function escapeHtml(value) {
   return value.replace(/[&<>'"]/g, character => ({
@@ -21,10 +16,8 @@ export function escapeHtml(value) {
   })[character]);
 }
 
-export function createSafeDocument({ title, content, style, visualTone = 'original' }) {
-  const baseTheme = themes[style];
-  if (!baseTheme) throw new Error('unsupported_style');
-  const theme = { ...baseTheme, ...(toneOverrides[visualTone] || toneOverrides.original) };
+export function createSafeDocument({ title, content, design }) {
+  const theme = normalizeDesign(design);
 
   const paragraphs = content.trim().split(/\n\s*\n/).filter(Boolean);
   const heading = escapeHtml(title.trim() || paragraphs.shift() || '未命名作品');

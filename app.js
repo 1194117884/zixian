@@ -7,8 +7,8 @@ const authDialog = document.querySelector('#auth-dialog');
 const emailForm = document.querySelector('#email-form');
 const authMessage = document.querySelector('#auth-message');
 const paymentDialog = document.querySelector('#payment-dialog');
-const styleNames = { note: 'Apple Notes', board: '手写板书', magazine: '编辑杂志', social: '知识卡片' };
-let selectedStyle = 'note';
+let selectedStyleTemplateId = null;
+let selectedDesign = { background:'#fffefb', foreground:'#1d1d1b', accent:'#1d1d1b', label:'ZIXIAN / DRAFT' };
 let currentUser = null;
 let currentDocumentId = null;
 let authStage = 'request';
@@ -17,7 +17,6 @@ let selectedModelId = 'fast';
 let availableModels = [];
 let hasGenerated = false;
 let versionCount = 0;
-let selectedTone = 'original';
 let conversationHistory = [];
 
 function escapeHtml(value) {
@@ -36,22 +35,9 @@ function renderDocument() {
   const title = blocks[0] || '让真正重要的那一句，被看见。';
   const body = blocks.slice(1);
   const highlight = body.pop() || '信息越多的时候，留白越是一种能力。';
-  const themes = {
-    note: { bg:'#f8e96a', ink:'#312f19', font:'Arial, sans-serif', top:'NOTES', accent:'#fff9a8' },
-    board: { bg:'#ece1d3', ink:'#2b2926', font:'Georgia, serif', top:'观点板书', accent:'#d95242' },
-    magazine: { bg:'#f5f2eb', ink:'#1c1b19', font:'Georgia, serif', top:'JIAN  /  04', accent:'#1c1b19' },
-    social: { bg:'#c6d9cc', ink:'#16362b', font:'Arial, sans-serif', top:'IDEA CARD', accent:'#f4ec75' }
-  };
-  const tones = {
-    original: {},
-    vivid: { bg:'#3b146f', ink:'#fff8ff', top:'VIVID / ZIXIAN', accent:'#58f4dc' },
-    night: { bg:'#13162a', ink:'#eff2ff', top:'NIGHT / ZIXIAN', accent:'#8c9eff' },
-    warm: { bg:'#f7d9bc', ink:'#48251e', top:'WARM / ZIXIAN', accent:'#ef6a4a' },
-    cool: { bg:'#cfe5ef', ink:'#173847', top:'COOL / ZIXIAN', accent:'#247c9d' }
-  };
-  const t = { ...themes[selectedStyle], ...tones[selectedTone] };
+  const t = { bg:selectedDesign.background, ink:selectedDesign.foreground, font:'Georgia, serif', top:selectedDesign.label, accent:selectedDesign.accent };
   const paragraphs = body.map((block, index) => `<p class="body ${index === 0 ? 'first' : ''}">${block}</p>`).join('');
-  preview.srcdoc = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>*{box-sizing:border-box}body{margin:0;padding:38px 31px;min-height:100vh;background:${t.bg};color:${t.ink};font-family:${t.font};display:flex;flex-direction:column}.top{font:600 9px Arial;letter-spacing:.18em;opacity:.68;border-bottom:1px solid currentColor;padding-bottom:14px}.number{font:10px Arial;letter-spacing:.1em;margin-top:30px;opacity:.65}.title{font-size:${selectedStyle === 'board' ? '29' : '25'}px;line-height:1.24;letter-spacing:-.06em;margin:9px 0 20px;font-weight:800}.body{font-size:13px;line-height:1.85;margin:0 0 15px}.first:first-letter{font-size:1.35em;font-weight:bold}.highlight{margin-top:auto;padding:14px 14px 15px;border-left:4px solid ${t.accent};background:rgba(255,255,255,.34);font-size:15px;line-height:1.55;font-weight:700;letter-spacing:-.03em}.foot{font:9px Arial;letter-spacing:.12em;opacity:.55;margin-top:25px}.line{width:33px;height:3px;background:${t.accent};margin:3px 0 20px}</style></head><body><div class="top">${t.top}</div><div class="number">01 — 想法记录</div><h1 class="title">${title}</h1><div class="line"></div>${paragraphs}<div class="highlight">${highlight}</div><div class="foot">ZIXIAN / VISUAL NOTE</div></body></html>`;
+  preview.srcdoc = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>*{box-sizing:border-box}body{margin:0;padding:38px 31px;min-height:100vh;background:${t.bg};color:${t.ink};font-family:${t.font};display:flex;flex-direction:column}.top{font:600 9px Arial;letter-spacing:.18em;opacity:.68;border-bottom:1px solid currentColor;padding-bottom:14px}.number{font:10px Arial;letter-spacing:.1em;margin-top:30px;opacity:.65}.title{font-size:25px;line-height:1.24;letter-spacing:-.06em;margin:9px 0 20px;font-weight:800}.body{font-size:13px;line-height:1.85;margin:0 0 15px}.first:first-letter{font-size:1.35em;font-weight:bold}.highlight{margin-top:auto;padding:14px 14px 15px;border-left:4px solid ${t.accent};background:rgba(255,255,255,.34);font-size:15px;line-height:1.55;font-weight:700;letter-spacing:-.03em}.foot{font:9px Arial;letter-spacing:.12em;opacity:.55;margin-top:25px}.line{width:33px;height:3px;background:${t.accent};margin:3px 0 20px}</style></head><body><div class="top">${t.top}</div><div class="number">01 — 想法记录</div><h1 class="title">${title}</h1><div class="line"></div>${paragraphs}<div class="highlight">${highlight}</div><div class="foot">ZIXIAN / VISUAL NOTE</div></body></html>`;
 }
 
 function addConversationMessage(role, text) {
@@ -90,7 +76,9 @@ function showGeneratedDocument() {
 function resetCreation() {
   hasGenerated = false;
   versionCount = 0;
-  selectedTone = 'original';
+  selectedStyleTemplateId = null;
+  selectedDesign = { background:'#fffefb', foreground:'#1d1d1b', accent:'#1d1d1b', label:'ZIXIAN / DRAFT' };
+  document.querySelector('#style-reference').textContent = '未引用风格 · 本次作品将创建自己的设计';
   conversationHistory = [];
   currentDocumentId = null;
   document.querySelector('#source-content').hidden = false;
@@ -153,18 +141,17 @@ function setAuthMessage(message, isError = false) {
   authMessage.classList.toggle('error', isError);
 }
 
-function chooseStyle(style, label = styleNames[style]) {
-  if (!styleNames[style]) return;
-  selectedStyle = style;
-  if (!hasGenerated) currentDocumentId = null;
-  document.querySelectorAll('.style-card').forEach(item => item.classList.toggle('selected', item.dataset.style === style));
+function chooseStyleReference(style) {
+  selectedStyleTemplateId = style.id;
+  selectedDesign = style.design;
+  document.querySelector('#style-reference').textContent = `引用「${style.title}」作为灵感 · 生成结果仍是你的独立设计`;
   if (!hasGenerated) renderDocument();
 }
 
 function renderStyleLibrary(styles) {
   const container = document.querySelector('#style-results');
   if (!styles.length) { container.innerHTML = '<p class="library-empty">还没有公开风格。发布你的第一份作品吧。</p>'; return; }
-  container.innerHTML = styles.map(item => `<article class="library-card" data-template-id="${escapeHtml(item.id)}" data-style="${escapeHtml(item.style)}"><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.description || styleNames[item.style] || '')}</p><div class="library-meta"><span>${escapeHtml(item.author || '字见用户')}</span><span>♥ ${item.likes}</span><span>↗ ${item.uses}</span></div><div class="library-actions"><button class="like-style" type="button">${item.liked ? '已喜欢' : '喜欢'}</button><button class="use-style" type="button">使用风格</button></div></article>`).join('');
+  container.innerHTML = styles.map(item => `<article class="library-card" data-template-id="${escapeHtml(item.id)}"><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.description || '来自用户作品的安全设计参考')}</p><div class="library-meta"><span>${escapeHtml(item.author || '字见用户')}</span><span>♥ ${item.likes}</span><span>↗ ${item.uses}</span></div><div class="library-actions"><button class="like-style" type="button">${item.liked ? '已喜欢' : '喜欢'}</button><button class="use-style" type="button">借用参考</button></div></article>`).join('');
 }
 
 async function loadStyleLibrary() {
@@ -208,18 +195,12 @@ async function saveDocument() {
     showToast('先写下一点想表达的内容吧');
     return null;
   }
-  const saved = await api('/api/documents', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: content.value.trim().split(/\n/)[0].slice(0, 80), content: content.value, style: selectedStyle, instruction: instruction.value }) });
+  const saved = await api('/api/documents', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: content.value.trim().split(/\n/)[0].slice(0, 80), content: content.value, design: selectedDesign, instruction: instruction.value }) });
   currentDocumentId = saved.id;
   return saved;
 }
 
 content.addEventListener('input', () => { count.textContent = content.value.length; if (!hasGenerated) { currentDocumentId = null; renderDocument(); } });
-document.querySelector('#styles').addEventListener('click', event => {
-  const card = event.target.closest('.style-card');
-  if (!card) return;
-  chooseStyle(card.dataset.style);
-  showToast(`已切换为「${styleNames[selectedStyle]}」设计语言`);
-});
 document.querySelector('#generate').addEventListener('click', async () => {
   if (!await requireLogin()) return;
   if (!content.value.trim()) return showToast('先写下一点想表达的内容吧');
@@ -234,12 +215,12 @@ document.querySelector('#generate').addEventListener('click', async () => {
     const result = await api('/api/generation-jobs', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
-      body: JSON.stringify({ modelId: selectedModelId, documentId: currentDocumentId || undefined, title: content.value.trim().split(/\n/)[0], content: content.value, instruction: instruction.value, style: selectedStyle, history: [...conversationHistory, { role: 'user', content: direction || '请生成第一版视觉作品。' }] })
+      body: JSON.stringify({ modelId: selectedModelId, documentId: currentDocumentId || undefined, styleTemplateId: selectedStyleTemplateId || undefined, title: content.value.trim().split(/\n/)[0], content: content.value, instruction: instruction.value, history: [...conversationHistory, { role: 'user', content: direction || '请生成第一版视觉作品。' }] })
     });
     content.value = [result.composition.title, ...result.composition.paragraphs, result.composition.highlight].join('\n\n');
     count.textContent = content.value.length;
     currentDocumentId = result.document.id;
-    selectedTone = result.composition.visualTone || 'original';
+    selectedDesign = result.composition.design || selectedDesign;
     renderDocument();
     showGeneratedDocument();
     if (initialGeneration) addConversationMessage('user', direction || '请将这段内容制作为可分享的视觉作品。');
@@ -290,11 +271,11 @@ document.querySelector('#publish-style').addEventListener('click', async () => {
     showToast('已发布到风格库');
   } catch (error) { showToast(error.code === 'already_published' ? '这份作品已经发布为风格' : '风格发布失败，请稍后重试'); }
 });
-document.querySelector('#open-style-library').addEventListener('click', async event => {
+document.querySelectorAll('.open-style-library').forEach(button => button.addEventListener('click', async event => {
   event.preventDefault();
   document.querySelector('#style-library-dialog').showModal();
   try { await loadStyleLibrary(); } catch { showToast('风格库暂不可用，请稍后重试'); }
-});
+}));
 document.querySelector('#close-style-library').addEventListener('click', () => document.querySelector('#style-library-dialog').close());
 document.querySelector('#style-search-form').addEventListener('submit', async event => {
   event.preventDefault();
@@ -313,7 +294,7 @@ document.querySelector('#style-results').addEventListener('click', async event =
     if (event.target.closest('.use-style')) {
       if (!await requireLogin()) return;
       const result = await api(`/api/styles/${card.dataset.templateId}/use`, { method: 'POST' });
-      chooseStyle(result.style.style, result.style.title);
+      chooseStyleReference(result.style);
       document.querySelector('#style-library-dialog').close();
       showToast(`已应用「${result.style.title}」`);
     }

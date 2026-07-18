@@ -1,4 +1,4 @@
-import { createSafeDocument, supportedStyles } from './safe-document.js';
+import { createSafeDocument, normalizeDesign } from './safe-document.js';
 import { generateComposition, modelCatalog } from './models.js';
 import { refundGenerationCredits, reserveGenerationCredits } from './credits.js';
 import { grantTestCredits } from './payments.js';
@@ -25,7 +25,7 @@ function badRequest(message) {
 }
 
 function validDocumentPayload(payload) {
-  return payload && typeof payload.content === 'string' && payload.content.trim() && payload.content.length <= 10000 && supportedStyles.includes(payload.style);
+  return payload && typeof payload.content === 'string' && payload.content.trim() && payload.content.length <= 10000;
 }
 
 function styleTemplatePayload(payload, fallbackTitle) {
@@ -39,13 +39,14 @@ async function createDocumentForOwner({ ownerId, payload, env }) {
   const versionId = id();
   const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim().slice(0, 120) : '未命名作品';
   const objectKey = `documents/${documentId}/versions/${versionId}/safe.html`;
-  const html = createSafeDocument({ title, content: payload.content, style: payload.style, visualTone: payload.visualTone });
+  const design = normalizeDesign(payload.design);
+  const html = createSafeDocument({ title, content: payload.content, design });
 
   await env.ASSETS.put(objectKey, html, { httpMetadata: { contentType: 'text/html; charset=utf-8' } });
   await env.DB.batch([
     env.DB.prepare('INSERT OR IGNORE INTO users (id) VALUES (?)').bind(ownerId),
     env.DB.prepare('INSERT INTO documents (id, owner_id, title, current_version_id) VALUES (?, ?, ?, ?)').bind(documentId, ownerId, title, versionId),
-    env.DB.prepare('INSERT INTO document_versions (id, document_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?)').bind(versionId, documentId, JSON.stringify({ content: payload.content, style: payload.style, visualTone: payload.visualTone || 'original' }), objectKey, 'approved')
+    env.DB.prepare('INSERT INTO document_versions (id, document_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?)').bind(versionId, documentId, JSON.stringify({ content: payload.content, design }), objectKey, 'approved')
   ]);
 
   return { id: documentId, versionId, title, status: 'draft' };
@@ -55,11 +56,12 @@ async function createDocumentVersionForOwner({ ownerId, document, payload, env }
   const versionId = id();
   const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim().slice(0, 120) : document.title;
   const objectKey = `documents/${document.id}/versions/${versionId}/safe.html`;
-  const html = createSafeDocument({ title, content: payload.content, style: payload.style, visualTone: payload.visualTone });
+  const design = normalizeDesign(payload.design);
+  const html = createSafeDocument({ title, content: payload.content, design });
 
   await env.ASSETS.put(objectKey, html, { httpMetadata: { contentType: 'text/html; charset=utf-8' } });
   await env.DB.batch([
-    env.DB.prepare('INSERT INTO document_versions (id, document_id, parent_version_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?, ?)').bind(versionId, document.id, document.current_version_id, JSON.stringify({ content: payload.content, style: payload.style, visualTone: payload.visualTone || 'original' }), objectKey, 'approved'),
+    env.DB.prepare('INSERT INTO document_versions (id, document_id, parent_version_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?, ?)').bind(versionId, document.id, document.current_version_id, JSON.stringify({ content: payload.content, design }), objectKey, 'approved'),
     env.DB.prepare('UPDATE documents SET title = ?, current_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?').bind(title, versionId, document.id, ownerId)
   ]);
 
@@ -114,16 +116,15 @@ async function publishStyleTemplate(request, env, documentId) {
   const version = await env.DB.prepare('SELECT id, content_json, safety_status FROM document_versions WHERE id = ? AND document_id = ?').bind(document.current_version_id, document.id).first();
   if (!version || version.safety_status !== 'approved') return json({ error: 'not_publishable' }, { status: 409 });
   const content = JSON.parse(version.content_json);
-  if (!supportedStyles.includes(content.style)) return json({ error: 'not_publishable' }, { status: 409 });
   const payload = await request.json().catch(() => null);
   const template = styleTemplatePayload(payload, document.title);
   const templateId = id();
   try {
-    await env.DB.prepare('INSERT INTO style_templates (id, owner_id, source_document_id, source_version_id, title, description, style_key) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(templateId, ownerId, document.id, version.id, template.title, template.description, content.style).run();
+    await env.DB.prepare('INSERT INTO style_templates (id, owner_id, source_document_id, source_version_id, title, description, style_key) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(templateId, ownerId, document.id, version.id, template.title, template.description, 'document-reference').run();
   } catch {
     return json({ error: 'already_published' }, { status: 409 });
   }
-  return json({ id: templateId, ...template, style: content.style, likes: 0, uses: 0 }, { status: 201 });
+  return json({ id: templateId, ...template, likes: 0, uses: 0 }, { status: 201 });
 }
 
 async function listStyleTemplates(request, env) {
@@ -160,12 +161,13 @@ async function toggleStyleLike(request, env, templateId) {
 async function useStyleTemplate(request, env, templateId) {
   const userId = await sessionUserId(request, env);
   if (!userId) return json({ error: 'unauthorized' }, { status: 401 });
-  const template = await env.DB.prepare('SELECT id, title, description, style_key AS style, uses_count AS uses FROM style_templates WHERE id = ?').bind(templateId).first();
+  const template = await env.DB.prepare('SELECT t.id, t.title, t.description, t.uses_count AS uses, v.content_json FROM style_templates t JOIN document_versions v ON v.id = t.source_version_id WHERE t.id = ?').bind(templateId).first();
   if (!template) return json({ error: 'not_found' }, { status: 404 });
   const usage = await env.DB.prepare('INSERT OR IGNORE INTO style_template_uses (template_id, user_id) VALUES (?, ?)').bind(templateId, userId).run();
   if (usage.meta.changes) await env.DB.prepare('UPDATE style_templates SET uses_count = uses_count + 1 WHERE id = ?').bind(templateId).run();
   const updated = await env.DB.prepare('SELECT uses_count AS uses FROM style_templates WHERE id = ?').bind(templateId).first();
-  return json({ style: { ...template, uses: updated.uses }, firstUse: Boolean(usage.meta.changes) });
+  const source = JSON.parse(template.content_json);
+  return json({ style: { id: template.id, title: template.title, description: template.description, design: normalizeDesign(source.design), uses: updated.uses }, firstUse: Boolean(usage.meta.changes) });
 }
 
 async function createExport(request, env, documentId) {
@@ -213,6 +215,9 @@ async function createGenerationJob(request, env) {
     ? await env.DB.prepare('SELECT id, title, status, current_version_id FROM documents WHERE id = ? AND owner_id = ?').bind(payload.documentId, ownerId).first()
     : null;
   if (typeof payload.documentId === 'string' && !existingDocument) return json({ error: 'not_found' }, { status: 404 });
+  const reference = typeof payload.styleTemplateId === 'string'
+    ? await env.DB.prepare('SELECT v.content_json FROM style_templates t JOIN document_versions v ON v.id = t.source_version_id WHERE t.id = ?').bind(payload.styleTemplateId).first()
+    : null;
 
   try {
     const reservation = await reserveGenerationCredits({
@@ -233,15 +238,15 @@ async function createGenerationJob(request, env) {
         title: payload.title,
         content: payload.content,
         instruction: payload.instruction,
-        style: payload.style,
+        referenceDesign: reference ? normalizeDesign(JSON.parse(reference.content_json).design) : undefined,
         history: payload.history,
         revision: Boolean(existingDocument),
         env
       });
       const generatedContent = [...composition.paragraphs, composition.highlight].join('\n\n');
       const document = existingDocument
-        ? await createDocumentVersionForOwner({ ownerId, document: existingDocument, payload: { title: composition.title, content: generatedContent, style: payload.style, visualTone: composition.visualTone }, env })
-        : await createDocumentForOwner({ ownerId, payload: { title: composition.title, content: generatedContent, style: payload.style, visualTone: composition.visualTone }, env });
+        ? await createDocumentVersionForOwner({ ownerId, document: existingDocument, payload: { title: composition.title, content: generatedContent, design: composition.design }, env })
+        : await createDocumentForOwner({ ownerId, payload: { title: composition.title, content: generatedContent, design: composition.design }, env });
       await env.DB.prepare("UPDATE generation_jobs SET document_id = ?, status = 'succeeded', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?").bind(document.id, reservation.job.id, ownerId).run();
       return json({ job: { ...reservation.job, status: 'succeeded' }, document, composition }, { status: 201 });
     } catch (error) {
