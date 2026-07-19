@@ -188,8 +188,8 @@ async function adminStyles(request, env) {
   const identity = await adminUser(request, env);
   if (identity.error) return json({ error: identity.error }, { status: identity.error === 'unauthorized' ? 401 : 403 });
   const status = new URL(request.url).searchParams.get('status');
-  const filter = ['pending', 'approved', 'hidden'].includes(status) ? 'WHERE t.moderation_status = ?' : '';
-  const result = await env.DB.prepare(`SELECT t.id, t.title, t.description, t.moderation_status AS moderationStatus, t.preview_object_key AS previewObjectKey, t.likes_count AS likes, t.uses_count AS uses, t.created_at AS createdAt, u.email AS author FROM style_templates t LEFT JOIN users u ON u.id = t.owner_id ${filter} ORDER BY CASE t.moderation_status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END, t.created_at DESC LIMIT 80`).bind(...(filter ? [status] : [])).all();
+  const filter = ['approved', 'hidden'].includes(status) ? 'WHERE t.moderation_status = ?' : '';
+  const result = await env.DB.prepare(`SELECT t.id, t.title, t.description, t.moderation_status AS moderationStatus, t.preview_object_key AS previewObjectKey, t.likes_count AS likes, t.uses_count AS uses, t.created_at AS createdAt, u.email AS author FROM style_templates t LEFT JOIN users u ON u.id = t.owner_id ${filter} ORDER BY CASE t.moderation_status WHEN 'approved' THEN 0 ELSE 1 END, t.created_at DESC LIMIT 80`).bind(...(filter ? [status] : [])).all();
   return json({ styles: (result.results || []).map(style => ({ ...style, previewUrl: style.previewObjectKey ? `/api/styles/${style.id}/preview` : null })) });
 }
 
@@ -198,7 +198,7 @@ async function moderateStyle(request, env, templateId) {
   if (identity.error) return json({ error: identity.error }, { status: identity.error === 'unauthorized' ? 401 : 403 });
   const payload = await request.json().catch(() => null);
   const status = payload?.status;
-  if (!['pending', 'approved', 'hidden'].includes(status)) return badRequest('valid moderation status is required');
+  if (!['approved', 'hidden'].includes(status)) return badRequest('valid moderation status is required');
   const updated = await env.DB.prepare('UPDATE style_templates SET moderation_status = ? WHERE id = ?').bind(status, templateId).run();
   if (!updated.meta.changes) return json({ error: 'not_found' }, { status: 404 });
   await env.DB.prepare('INSERT INTO admin_audit_logs (id, admin_user_id, action, target_type, target_id, detail_json) VALUES (?, ?, ?, ?, ?, ?)').bind(id(), identity.user.id, 'moderate', 'style_template', templateId, JSON.stringify({ status })).run();
@@ -391,11 +391,11 @@ async function publishStyleTemplate(request, env, documentId) {
     }
   }
   try {
-    await env.DB.prepare("INSERT INTO style_templates (id, owner_id, source_document_id, source_version_id, title, description, style_key, preview_object_key, moderation_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')").bind(templateId, ownerId, document.id, version.id, template.title, template.description, 'document-reference', previewObjectKey).run();
+    await env.DB.prepare("INSERT INTO style_templates (id, owner_id, source_document_id, source_version_id, title, description, style_key, preview_object_key, moderation_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved')").bind(templateId, ownerId, document.id, version.id, template.title, template.description, 'document-reference', previewObjectKey).run();
   } catch {
     return json({ error: 'already_published' }, { status: 409 });
   }
-  return json({ id: templateId, ...template, moderationStatus: 'pending', previewUrl: `/api/styles/${templateId}/preview`, likes: 0, uses: 0 }, { status: 201 });
+  return json({ id: templateId, ...template, moderationStatus: 'approved', previewUrl: `/api/styles/${templateId}/preview`, likes: 0, uses: 0 }, { status: 201 });
 }
 
 async function listStyleTemplates(request, env) {

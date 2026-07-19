@@ -38,12 +38,12 @@ function renderUsageSummary(summary, channels) {
 
 function renderModeration(styles) {
   const container = document.querySelector('#style-moderation');
-  if (!styles.length) { container.innerHTML = '<p>没有待审核风格。</p>'; return; }
-  container.innerHTML = styles.map(style => `<article data-style-id="${escapeHtml(style.id)}">${style.previewUrl ? `<img src="${escapeHtml(style.previewUrl)}" alt="">` : ''}<div><b>${escapeHtml(style.title)}</b><small>${escapeHtml(style.author || '匿名用户')} · 使用 ${style.uses} · 喜欢 ${style.likes}</small><p>${escapeHtml(style.description || '无描述')}</p></div><div class="moderation-actions"><button data-status="approved">批准</button><button data-status="hidden">下架</button></div></article>`).join('');
+  if (!styles.length) { container.innerHTML = '<p>还没有公开或已下架风格。</p>'; return; }
+  container.innerHTML = styles.map(style => `<article data-style-id="${escapeHtml(style.id)}">${style.previewUrl ? `<img src="${escapeHtml(style.previewUrl)}" alt="">` : ''}<div><b>${escapeHtml(style.title)}</b><small>${escapeHtml(style.author || '匿名用户')} · ${style.moderationStatus === 'hidden' ? '已下架' : '公开中'} · 使用 ${style.uses} · 喜欢 ${style.likes}</small><p>${escapeHtml(style.description || '无描述')}</p></div><div class="moderation-actions"><button data-status="${style.moderationStatus === 'hidden' ? 'approved' : 'hidden'}">${style.moderationStatus === 'hidden' ? '恢复上架' : '下架'}</button></div></article>`).join('');
 }
 
 async function loadModeration() {
-  const result = await api('/api/admin/styles?status=pending');
+  const result = await api('/api/admin/styles');
   renderModeration(result.styles);
 }
 

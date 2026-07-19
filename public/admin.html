@@ -19,7 +19,7 @@
       <section class="panel"><div><p>近 30 天</p><h2>创作与渠道用量</h2></div><div id="usage-summary" class="activity"></div></section>
       <section class="panel"><div><p>近期生成活动</p><h2>模型、渠道与 Token 消耗</h2></div><div id="recent-activity" class="activity"></div></section>
       <section class="panel"><div><p>渠道运行</p><h2>最近请求与故障转移</h2></div><div id="channel-runs" class="activity"></div></section>
-      <section class="panel"><div><p>风格审核</p><h2>待处理的社区风格</h2></div><div id="style-moderation" class="moderation"></div></section>
+      <section class="panel"><div><p>风格管理</p><h2>公开与已下架风格</h2></div><div id="style-moderation" class="moderation"></div></section>
       <section class="panel config"><div><p>AI 配置</p><h2>系统提示词与模型渠道</h2></div><p>每个渠道完全由你填写：平台、调用协议、接口地址、模型名称、Key 与所属等级。同一等级的可用渠道会均衡分配；遇到限流、并发上限、失效 Key 或上游故障会自动切换下一个账号。</p><form id="ai-config-form"><label>系统提示词<textarea id="system-prompt" maxlength="12000" required></textarea></label><div id="model-accounts" class="accounts"></div><button type="button" class="add-account">添加模型渠道</button><div class="config-actions"><small id="config-message"></small><button type="submit">保存 AI 配置</button></div></form></section>
     </main>
     <section id="access-denied" class="access"><p>字见 / 管理后台</p><h1>正在验证管理员权限…</h1><a href="/">返回创作台</a></section>
