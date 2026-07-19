@@ -38,6 +38,6 @@
     }
   ],
   "vars": {
-    "APP_ORIGIN": "http://localhost:4173"
+    "APP_ORIGIN": "https://zixian.yongkl.cc"
   }
 }
