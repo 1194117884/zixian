@@ -47,7 +47,7 @@ async function adminMe(request, env) {
 async function adminOverview(request, env) {
   const identity = await adminUser(request, env);
   if (identity.error) return json({ error: identity.error }, { status: identity.error === 'unauthorized' ? 401 : 403 });
-  const [users, documents, generations, credits, usersToday, documentsToday, recent, channelRuns] = await env.DB.batch([
+  const [users, documents, generations, credits, usersToday, documentsToday, recent, channelRuns, activeCreators, tokenTotals, testOrders, liveRevenue, channelSummary] = await env.DB.batch([
     env.DB.prepare('SELECT COUNT(*) AS count FROM users'),
     env.DB.prepare('SELECT COUNT(*) AS count FROM documents'),
     env.DB.prepare("SELECT COUNT(*) AS count FROM generation_jobs WHERE status = 'succeeded'"),
@@ -55,13 +55,21 @@ async function adminOverview(request, env) {
     env.DB.prepare("SELECT COUNT(*) AS count FROM users WHERE created_at >= datetime('now', '-1 day')"),
     env.DB.prepare("SELECT COUNT(*) AS count FROM documents WHERE created_at >= datetime('now', '-1 day')"),
     env.DB.prepare("SELECT u.email, g.model_id AS modelId, g.cost_credits AS costCredits, g.created_at AS createdAt, g.provider_platform AS providerPlatform, g.provider_model_name AS providerModelName, g.input_tokens AS inputTokens, g.output_tokens AS outputTokens, g.attempt_count AS attemptCount FROM generation_jobs g LEFT JOIN users u ON u.id = g.owner_id WHERE g.status = 'succeeded' ORDER BY g.created_at DESC LIMIT 12"),
-    env.DB.prepare("SELECT a.provider_platform AS providerPlatform, a.provider_model_name AS providerModelName, a.http_status AS httpStatus, a.error_code AS errorCode, a.created_at AS createdAt, g.model_id AS modelId FROM generation_attempts a JOIN generation_jobs g ON g.id = a.generation_job_id ORDER BY a.created_at DESC LIMIT 16")
+    env.DB.prepare("SELECT a.provider_platform AS providerPlatform, a.provider_model_name AS providerModelName, a.http_status AS httpStatus, a.error_code AS errorCode, a.created_at AS createdAt, g.model_id AS modelId FROM generation_attempts a JOIN generation_jobs g ON g.id = a.generation_job_id ORDER BY a.created_at DESC LIMIT 16"),
+    env.DB.prepare("SELECT COUNT(DISTINCT owner_id) AS count FROM generation_jobs WHERE status = 'succeeded' AND created_at >= datetime('now', '-30 days')"),
+    env.DB.prepare("SELECT COALESCE(SUM(input_tokens), 0) AS inputTokens, COALESCE(SUM(output_tokens), 0) AS outputTokens FROM generation_jobs WHERE status = 'succeeded' AND created_at >= datetime('now', '-30 days')"),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM payment_orders WHERE payment_mode = 'test' AND status = 'succeeded'"),
+    env.DB.prepare("SELECT COALESCE(SUM(amount_cents), 0) AS amountCents FROM payment_orders WHERE payment_mode = 'live' AND status = 'succeeded'"),
+    env.DB.prepare("SELECT provider_platform AS providerPlatform, provider_model_name AS providerModelName, COUNT(*) AS requests, SUM(CASE WHEN http_status BETWEEN 200 AND 299 THEN 1 ELSE 0 END) AS successes, COALESCE(SUM(input_tokens), 0) AS inputTokens, COALESCE(SUM(output_tokens), 0) AS outputTokens FROM generation_attempts WHERE created_at >= datetime('now', '-30 days') GROUP BY provider_platform, provider_model_name ORDER BY requests DESC LIMIT 12")
   ]);
   return json({
     totals: { users: users.results[0].count, documents: documents.results[0].count, generations: generations.results[0].count, creditsUsed: credits.results[0].count },
     today: { users: usersToday.results[0].count, documents: documentsToday.results[0].count },
+    thirtyDays: { activeCreators: activeCreators.results[0].count, inputTokens: tokenTotals.results[0].inputTokens, outputTokens: tokenTotals.results[0].outputTokens },
+    orders: { testCount: testOrders.results[0].count, liveRevenueCents: liveRevenue.results[0].amountCents },
     recentGenerations: (recent.results || []).map(item => ({ ...item, modelLabel: modelCatalog[item.modelId]?.label || item.modelId })),
-    recentChannelRuns: (channelRuns.results || []).map(item => ({ ...item, modelLabel: modelCatalog[item.modelId]?.label || item.modelId }))
+    recentChannelRuns: (channelRuns.results || []).map(item => ({ ...item, modelLabel: modelCatalog[item.modelId]?.label || item.modelId })),
+    channelSummary: channelSummary.results || []
   });
 }
 

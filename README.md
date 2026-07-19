@@ -32,7 +32,7 @@
 
 ## 测试充值
 
-设置 `PAYMENTS_MODE=test` 后，积分卡片会显示一个“模拟 Stripe”流程：等待约 1.2 秒后将 100 积分写入正常的钱包与账本。它不会连接 Stripe、不会创建支付订单、也不会扣款。部署真实收费前，必须移除此变量和 `/api/test-payments` 路由，并改为经 Stripe webhook 验签入账。
+设置 `PAYMENTS_MODE=test` 后，积分卡片会显示一个“模拟 Stripe”流程：等待约 1.2 秒后将 100 积分写入正常的钱包与账本。它不会连接 Stripe、不会扣款；会留下金额为 ¥0 的测试订单，供后台统计测试流程，且永不计入实际收入。部署真实收费前，必须移除此变量和 `/api/test-payments` 路由，并改为经 Stripe webhook 验签入账。
 
 ## 代码边界
 

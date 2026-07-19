@@ -157,6 +157,7 @@ test('test payment credits the normal wallet ledger without calling Stripe', asy
   assert.equal(result.balance, 100);
   assert.match(statements[0].sql, /UPDATE wallets SET balance = balance \+ \?/);
   assert.match(statements[1].sql, /'purchase'/);
+  assert.match(statements[2].sql, /INSERT INTO payment_orders/);
 });
 
 test('failed generation refunds only through the existing credit ledger', async () => {

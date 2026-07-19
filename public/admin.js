@@ -28,6 +28,14 @@ function renderChannelRuns(items) {
   container.innerHTML = items.map(item => `<article><span>${escapeHtml(item.providerPlatform)} / ${escapeHtml(item.providerModelName)}</span><b>${item.httpStatus === 200 ? '成功' : item.errorCode || '失败'}</b><small>${item.modelLabel} · ${item.createdAt}</small></article>`).join('');
 }
 
+function renderUsageSummary(summary, channels) {
+  const container = document.querySelector('#usage-summary');
+  const totalTokens = summary.inputTokens + summary.outputTokens;
+  const overview = `<article><span>${summary.activeCreators} 位活跃创作者</span><b>${totalTokens} Token</b><small>输入 ${summary.inputTokens} · 输出 ${summary.outputTokens}</small></article>`;
+  const details = channels.map(item => `<article><span>${escapeHtml(item.providerPlatform)} / ${escapeHtml(item.providerModelName)}</span><b>${item.successes}/${item.requests} 成功</b><small>${item.inputTokens + item.outputTokens} Token</small></article>`).join('');
+  container.innerHTML = overview + (details || '<p>还没有渠道用量记录。</p>');
+}
+
 function fillAiConfig(config) {
   document.querySelector('#system-prompt').value = config.systemPrompt;
   renderAccounts(config.accounts);
@@ -86,9 +94,12 @@ async function boot() {
     text('#documents-new', `近 24 小时新增 ${overview.today.documents} 份`);
     text('#generations-count', overview.totals.generations);
     text('#credits-used', `累计消耗 ${overview.totals.creditsUsed} 积分`);
+    text('#live-revenue', `¥${(overview.orders.liveRevenueCents / 100).toFixed(2)}`);
+    text('#test-orders', `测试订单 ${overview.orders.testCount} 笔（不计收入）`);
     text('#updated-at', `更新于 ${new Date().toLocaleString('zh-CN')}`);
     renderActivity(overview.recentGenerations);
     renderChannelRuns(overview.recentChannelRuns);
+    renderUsageSummary(overview.thirtyDays, overview.channelSummary);
     fillAiConfig(aiConfig);
     denied.hidden = true;
     shell.hidden = false;
