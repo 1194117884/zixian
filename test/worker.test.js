@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import worker from '../src/worker.js';
-import { createSafeDocument, renderDocumentHtml } from '../src/safe-document.js';
+import { createSafeDocument } from '../src/safe-document.js';
 import { createCompositionPrompt, generateComposition, getModel, parseComposition, systemPrompt } from '../src/models.js';
 import { exportObjectKey, renderHtmlToPng, stylePreviewObjectKey } from '../src/export.js';
 import { hashSecret, normalizeEmail, validEmail } from '../src/auth.js';
@@ -33,7 +33,6 @@ test('safe document escapes user-provided markup and has no script execution', (
   assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.doesNotMatch(html, /<script>/);
   assert.doesNotMatch(html, /min-height:100vh/);
-  assert.match(renderDocumentHtml('<html><head></head><body></body></html>'), /min-height:0!important/);
   assert.match(createSafeDocument({ title: '标题', content: '正文', design: { background: '#113355', foreground: '#ffffff', accent: '#ffcc00', label: 'MY DESIGN' } }), /#113355/);
 });
 

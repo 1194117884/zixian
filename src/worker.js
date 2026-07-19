@@ -1,4 +1,4 @@
-import { createSafeDocument, normalizeDesign, renderDocumentHtml } from './safe-document.js';
+import { createSafeDocument, normalizeDesign } from './safe-document.js';
 import { generateComposition, modelCatalog } from './models.js';
 import { refundCloudRenderCredits, refundGenerationCredits, reserveCloudRenderCredits, reserveGenerationCredits } from './credits.js';
 import { grantTestCredits } from './payments.js';
@@ -129,7 +129,7 @@ async function serveDocumentVersionPreview(request, env, documentId, versionId) 
   if (!version) return json({ error: 'not_found' }, { status: 404 });
   const object = await env.ASSETS.get(version.html_object_key);
   if (!object) return json({ error: 'not_found' }, { status: 404 });
-  return new Response(renderDocumentHtml(await object.text()), { headers: privateHtmlHeaders });
+  return new Response(object.body, { headers: privateHtmlHeaders });
 }
 
 async function publishDocument(request, env, documentId) {
@@ -163,7 +163,7 @@ async function servePublishedPage(env, publicSlug) {
 
   const object = await env.ASSETS.get(version.html_object_key);
   if (!object) return new Response('Not found', { status: 404 });
-  return new Response(renderDocumentHtml(await object.text()), { headers: htmlHeaders });
+  return new Response(object.body, { headers: htmlHeaders });
 }
 
 async function listPublications(request, env) {
@@ -207,7 +207,7 @@ async function publishStyleTemplate(request, env, documentId) {
     if (!sourceObject) return json({ error: 'not_found' }, { status: 404 });
     try {
       previewObjectKey = stylePreviewObjectKey({ templateId });
-      const png = await renderHtmlToPng(env.BROWSER, renderDocumentHtml(await sourceObject.text()));
+      const png = await renderHtmlToPng(env.BROWSER, await sourceObject.text());
       await env.ASSETS.put(previewObjectKey, png, { httpMetadata: { contentType: 'image/png' } });
     } catch (error) {
       console.error('style preview render failed', error);
@@ -302,7 +302,7 @@ async function createExport(request, env, documentId) {
     await env.DB.prepare("UPDATE render_jobs SET status = 'running' WHERE id = ? AND owner_id = ?").bind(reservation.job.id, ownerId).run();
     const exportId = id();
     const objectKey = exportObjectKey({ documentId, versionId: version.id, exportId });
-    const png = await renderHtmlToPng(env.BROWSER, renderDocumentHtml(await htmlObject.text()));
+    const png = await renderHtmlToPng(env.BROWSER, await htmlObject.text());
     await env.ASSETS.put(objectKey, png, { httpMetadata: { contentType: 'image/png' } });
     await env.DB.batch([
       env.DB.prepare('INSERT INTO exports (id, owner_id, document_id, version_id, object_key) VALUES (?, ?, ?, ?, ?)').bind(exportId, ownerId, documentId, version.id, objectKey),
