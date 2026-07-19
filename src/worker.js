@@ -184,6 +184,27 @@ async function adminAiConfig(request, env) {
   return json(await readAiConfig(env));
 }
 
+async function adminStyles(request, env) {
+  const identity = await adminUser(request, env);
+  if (identity.error) return json({ error: identity.error }, { status: identity.error === 'unauthorized' ? 401 : 403 });
+  const status = new URL(request.url).searchParams.get('status');
+  const filter = ['pending', 'approved', 'hidden'].includes(status) ? 'WHERE t.moderation_status = ?' : '';
+  const result = await env.DB.prepare(`SELECT t.id, t.title, t.description, t.moderation_status AS moderationStatus, t.preview_object_key AS previewObjectKey, t.likes_count AS likes, t.uses_count AS uses, t.created_at AS createdAt, u.email AS author FROM style_templates t LEFT JOIN users u ON u.id = t.owner_id ${filter} ORDER BY CASE t.moderation_status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END, t.created_at DESC LIMIT 80`).bind(...(filter ? [status] : [])).all();
+  return json({ styles: (result.results || []).map(style => ({ ...style, previewUrl: style.previewObjectKey ? `/api/styles/${style.id}/preview` : null })) });
+}
+
+async function moderateStyle(request, env, templateId) {
+  const identity = await adminUser(request, env);
+  if (identity.error) return json({ error: identity.error }, { status: identity.error === 'unauthorized' ? 401 : 403 });
+  const payload = await request.json().catch(() => null);
+  const status = payload?.status;
+  if (!['pending', 'approved', 'hidden'].includes(status)) return badRequest('valid moderation status is required');
+  const updated = await env.DB.prepare('UPDATE style_templates SET moderation_status = ? WHERE id = ?').bind(status, templateId).run();
+  if (!updated.meta.changes) return json({ error: 'not_found' }, { status: 404 });
+  await env.DB.prepare('INSERT INTO admin_audit_logs (id, admin_user_id, action, target_type, target_id, detail_json) VALUES (?, ?, ?, ?, ?, ?)').bind(id(), identity.user.id, 'moderate', 'style_template', templateId, JSON.stringify({ status })).run();
+  return json({ id: templateId, moderationStatus: status });
+}
+
 function validDocumentPayload(payload) {
   return payload && typeof payload.content === 'string' && payload.content.trim() && payload.content.length <= 10000;
 }
@@ -326,7 +347,7 @@ async function listPublications(request, env) {
   if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
   const [pages, styles] = await Promise.all([
     env.DB.prepare('SELECT p.slug, d.title, p.created_at AS createdAt FROM published_pages p JOIN documents d ON d.id = p.document_id WHERE d.owner_id = ? ORDER BY p.created_at DESC LIMIT 50').bind(ownerId).all(),
-    env.DB.prepare('SELECT id, title, preview_object_key AS previewObjectKey, likes_count AS likes, uses_count AS uses, created_at AS createdAt FROM style_templates WHERE owner_id = ? ORDER BY created_at DESC LIMIT 50').bind(ownerId).all()
+    env.DB.prepare('SELECT id, title, moderation_status AS moderationStatus, preview_object_key AS previewObjectKey, likes_count AS likes, uses_count AS uses, created_at AS createdAt FROM style_templates WHERE owner_id = ? ORDER BY created_at DESC LIMIT 50').bind(ownerId).all()
   ]);
   const origin = new URL(request.url).origin;
   return json({
@@ -370,11 +391,11 @@ async function publishStyleTemplate(request, env, documentId) {
     }
   }
   try {
-    await env.DB.prepare('INSERT INTO style_templates (id, owner_id, source_document_id, source_version_id, title, description, style_key, preview_object_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(templateId, ownerId, document.id, version.id, template.title, template.description, 'document-reference', previewObjectKey).run();
+    await env.DB.prepare("INSERT INTO style_templates (id, owner_id, source_document_id, source_version_id, title, description, style_key, preview_object_key, moderation_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')").bind(templateId, ownerId, document.id, version.id, template.title, template.description, 'document-reference', previewObjectKey).run();
   } catch {
     return json({ error: 'already_published' }, { status: 409 });
   }
-  return json({ id: templateId, ...template, previewUrl: `/api/styles/${templateId}/preview`, likes: 0, uses: 0 }, { status: 201 });
+  return json({ id: templateId, ...template, moderationStatus: 'pending', previewUrl: `/api/styles/${templateId}/preview`, likes: 0, uses: 0 }, { status: 201 });
 }
 
 async function listStyleTemplates(request, env) {
@@ -383,16 +404,19 @@ async function listStyleTemplates(request, env) {
   const requestedLimit = Number.parseInt(url.searchParams.get('limit') || '', 10);
   const limit = Math.min(Math.max(Number.isFinite(requestedLimit) ? requestedLimit : query ? 50 : 20, 1), 50);
   const viewerId = await sessionUserId(request, env);
-  const filter = query ? 'WHERE t.title LIKE ? OR t.description LIKE ?' : '';
+  const filter = query ? 'WHERE t.moderation_status = \'approved\' AND (t.title LIKE ? OR t.description LIKE ?)' : "WHERE t.moderation_status = 'approved'";
   const params = query ? [viewerId || '', `%${query}%`, `%${query}%`] : [viewerId || ''];
   const result = await env.DB.prepare(`SELECT t.id, t.title, t.description, t.style_key AS style, t.preview_object_key AS previewObjectKey, t.likes_count AS likes, t.uses_count AS uses, t.created_at, u.email AS author, EXISTS(SELECT 1 FROM style_template_likes l WHERE l.template_id = t.id AND l.user_id = ?) AS liked FROM style_templates t LEFT JOIN users u ON u.id = t.owner_id ${filter} ORDER BY (t.uses_count + t.likes_count) DESC, t.uses_count DESC, t.created_at DESC LIMIT ${limit}`).bind(...params).all();
   return json({ styles: (result.results || []).map(style => ({ ...style, previewUrl: style.previewObjectKey ? `/api/styles/${style.id}/preview` : null })) });
 }
 
-async function serveStylePreview(env, templateId) {
-  const template = await env.DB.prepare('SELECT preview_object_key FROM style_templates WHERE id = ?').bind(templateId).first();
-  if (!template?.preview_object_key) return new Response('Not found', { status: 404 });
-  const object = await env.ASSETS.get(template.preview_object_key);
+async function serveStylePreview(request, env, templateId) {
+  const template = await env.DB.prepare('SELECT owner_id AS ownerId, moderation_status AS moderationStatus, preview_object_key AS previewObjectKey FROM style_templates WHERE id = ?').bind(templateId).first();
+  const viewerId = await sessionUserId(request, env);
+  const administrator = await adminUser(request, env);
+  if (!template || (template.moderationStatus !== 'approved' && template.ownerId !== viewerId && administrator.error)) return new Response('Not found', { status: 404 });
+  if (!template.previewObjectKey) return new Response('Not found', { status: 404 });
+  const object = await env.ASSETS.get(template.previewObjectKey);
   if (!object) return new Response('Not found', { status: 404 });
   return new Response(object.body, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=31536000, immutable', 'x-content-type-options': 'nosniff' } });
 }
@@ -400,7 +424,7 @@ async function serveStylePreview(env, templateId) {
 async function toggleStyleLike(request, env, templateId) {
   const userId = await sessionUserId(request, env);
   if (!userId) return json({ error: 'unauthorized' }, { status: 401 });
-  const template = await env.DB.prepare('SELECT id FROM style_templates WHERE id = ?').bind(templateId).first();
+  const template = await env.DB.prepare("SELECT id FROM style_templates WHERE id = ? AND moderation_status = 'approved'").bind(templateId).first();
   if (!template) return json({ error: 'not_found' }, { status: 404 });
   const existing = await env.DB.prepare('SELECT 1 FROM style_template_likes WHERE template_id = ? AND user_id = ?').bind(templateId, userId).first();
   if (existing) {
@@ -421,7 +445,7 @@ async function toggleStyleLike(request, env, templateId) {
 async function useStyleTemplate(request, env, templateId) {
   const userId = await sessionUserId(request, env);
   if (!userId) return json({ error: 'unauthorized' }, { status: 401 });
-  const template = await env.DB.prepare('SELECT t.id, t.title, t.description, t.uses_count AS uses, v.content_json FROM style_templates t JOIN document_versions v ON v.id = t.source_version_id WHERE t.id = ?').bind(templateId).first();
+  const template = await env.DB.prepare("SELECT t.id, t.title, t.description, t.uses_count AS uses, v.content_json FROM style_templates t JOIN document_versions v ON v.id = t.source_version_id WHERE t.id = ? AND t.moderation_status = 'approved'").bind(templateId).first();
   if (!template) return json({ error: 'not_found' }, { status: 404 });
   const usage = await env.DB.prepare('INSERT OR IGNORE INTO style_template_uses (template_id, user_id) VALUES (?, ?)').bind(templateId, userId).run();
   if (usage.meta.changes) await env.DB.prepare('UPDATE style_templates SET uses_count = uses_count + 1 WHERE id = ?').bind(templateId).run();
@@ -497,7 +521,7 @@ async function createGenerationJob(request, env) {
   const parentVersionId = typeof payload.parentVersionId === 'string' ? payload.parentVersionId : null;
   if (parentVersionId && (!existingDocument || !(await env.DB.prepare('SELECT id FROM document_versions WHERE id = ? AND document_id = ? AND safety_status = ?').bind(parentVersionId, existingDocument.id, 'approved').first()))) return badRequest('invalid parent version');
   const reference = typeof payload.styleTemplateId === 'string'
-    ? await env.DB.prepare('SELECT v.content_json FROM style_templates t JOIN document_versions v ON v.id = t.source_version_id WHERE t.id = ?').bind(payload.styleTemplateId).first()
+    ? await env.DB.prepare("SELECT v.content_json FROM style_templates t JOIN document_versions v ON v.id = t.source_version_id WHERE t.id = ? AND t.moderation_status = 'approved'").bind(payload.styleTemplateId).first()
     : null;
 
   try {
@@ -628,6 +652,10 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/admin/me') return adminMe(request, env);
     if (request.method === 'GET' && url.pathname === '/api/admin/overview') return adminOverview(request, env);
     if ((request.method === 'GET' || request.method === 'PUT') && url.pathname === '/api/admin/ai-config') return adminAiConfig(request, env);
+    if (request.method === 'GET' && url.pathname === '/api/admin/styles') return adminStyles(request, env);
+
+    const adminStyleMatch = url.pathname.match(/^\/api\/admin\/styles\/([^/]+)$/);
+    if (request.method === 'PATCH' && adminStyleMatch) return moderateStyle(request, env, adminStyleMatch[1]);
 
     if (request.method === 'GET' && url.pathname === '/api/wallet') return wallet(request, env);
     if (request.method === 'POST' && url.pathname === '/api/test-payments') return testPayment(request, env);
@@ -656,7 +684,7 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/styles') return listStyleTemplates(request, env);
 
     const stylePreviewMatch = url.pathname.match(/^\/api\/styles\/([^/]+)\/preview$/);
-    if (request.method === 'GET' && stylePreviewMatch) return serveStylePreview(env, stylePreviewMatch[1]);
+    if (request.method === 'GET' && stylePreviewMatch) return serveStylePreview(request, env, stylePreviewMatch[1]);
 
     const likeStyleMatch = url.pathname.match(/^\/api\/styles\/([^/]+)\/like$/);
     if (request.method === 'POST' && likeStyleMatch) return toggleStyleLike(request, env, likeStyleMatch[1]);

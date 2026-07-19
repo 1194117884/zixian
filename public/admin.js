@@ -36,6 +36,22 @@ function renderUsageSummary(summary, channels) {
   container.innerHTML = overview + (details || '<p>还没有渠道用量记录。</p>');
 }
 
+function renderModeration(styles) {
+  const container = document.querySelector('#style-moderation');
+  if (!styles.length) { container.innerHTML = '<p>没有待审核风格。</p>'; return; }
+  container.innerHTML = styles.map(style => `<article data-style-id="${escapeHtml(style.id)}">${style.previewUrl ? `<img src="${escapeHtml(style.previewUrl)}" alt="">` : ''}<div><b>${escapeHtml(style.title)}</b><small>${escapeHtml(style.author || '匿名用户')} · 使用 ${style.uses} · 喜欢 ${style.likes}</small><p>${escapeHtml(style.description || '无描述')}</p></div><div class="moderation-actions"><button data-status="approved">批准</button><button data-status="hidden">下架</button></div></article>`).join('');
+}
+
+async function loadModeration() {
+  const result = await api('/api/admin/styles?status=pending');
+  renderModeration(result.styles);
+}
+
+async function moderateStyle(templateId, status) {
+  await api(`/api/admin/styles/${encodeURIComponent(templateId)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status }) });
+  await loadModeration();
+}
+
 function fillAiConfig(config) {
   document.querySelector('#system-prompt').value = config.systemPrompt;
   renderAccounts(config.accounts);
@@ -100,6 +116,7 @@ async function boot() {
     renderActivity(overview.recentGenerations);
     renderChannelRuns(overview.recentChannelRuns);
     renderUsageSummary(overview.thirtyDays, overview.channelSummary);
+    await loadModeration();
     fillAiConfig(aiConfig);
     denied.hidden = true;
     shell.hidden = false;
@@ -112,5 +129,11 @@ document.querySelector('#ai-config-form').addEventListener('submit', saveAiConfi
 document.querySelector('#ai-config-form').addEventListener('click', event => {
   if (event.target.matches('.add-account')) addAccount();
   if (event.target.matches('.remove-account')) event.target.closest('.account-row').remove();
+});
+document.querySelector('#style-moderation').addEventListener('click', async event => {
+  const button = event.target.closest('[data-status]');
+  if (!button) return;
+  button.disabled = true;
+  try { await moderateStyle(button.closest('[data-style-id]').dataset.styleId, button.dataset.status); } catch { button.disabled = false; }
 });
 boot();

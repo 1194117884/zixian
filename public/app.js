@@ -605,7 +605,7 @@ document.querySelector('#publish-style-form').addEventListener('submit', async e
     } catch {}
     await api(`/api/documents/${dialog.dataset.documentId}/styles`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ versionId: dialog.dataset.versionId, title: document.querySelector('#style-title').value, previewDataUrl }) });
     dialog.close();
-    showToast('已发布到风格库');
+    showToast('已提交风格审核，批准后会出现在风格库');
   } catch (error) {
     showToast(error.code === 'already_published' ? '这份作品已经发布为风格' : error.code === 'render_unavailable' ? '示例图暂不可生成，请稍后重试' : '风格发布失败，请稍后重试');
   } finally {
