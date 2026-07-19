@@ -21,7 +21,7 @@ let hasGenerated = false;
 let versionCount = 0;
 let conversationHistory = [];
 let styleRailStyles = [];
-const cloudPreviewViewport = { width: 1080, height: 1440 };
+const cloudPreviewViewport = { width: 1080, height: 1 };
 
 function escapeHtml(value) {
   return value.replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
@@ -66,7 +66,7 @@ function addConversationMessage(role, text) {
 function fitPreviewBubble(bubble, iframe) {
   const source = iframe.contentDocument;
   if (!source?.body || bubble.clientWidth < 1) return;
-  const height = Math.max(cloudPreviewViewport.height, source.documentElement.scrollHeight, source.body.scrollHeight);
+  const height = Math.max(cloudPreviewViewport.height, source.body.scrollHeight);
   const scale = bubble.clientWidth / cloudPreviewViewport.width;
   iframe.style.height = `${height}px`;
   iframe.style.transform = `scale(${scale})`;

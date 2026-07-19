@@ -9,10 +9,8 @@ export function stylePreviewObjectKey({ templateId }) {
 export async function renderHtmlToPng(browser, html) {
   const response = await browser.quickAction('screenshot', {
     html,
-    screenshotOptions: {
-      fullPage: true
-    },
-    viewport: { width: 1080, height: 1440, deviceScaleFactor: 1 }
+    selector: 'body',
+    viewport: { width: 1080, height: 800, deviceScaleFactor: 1 }
   });
 
   if (!response.ok) throw new Error('render_failed');
