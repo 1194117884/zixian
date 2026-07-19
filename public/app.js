@@ -7,6 +7,7 @@ const authDialog = document.querySelector('#auth-dialog');
 const emailForm = document.querySelector('#email-form');
 const authMessage = document.querySelector('#auth-message');
 const paymentDialog = document.querySelector('#payment-dialog');
+const cloudRenderDialog = document.querySelector('#cloud-render-dialog');
 let selectedStyleTemplateId = null;
 let selectedDesign = { background:'#fffefb', foreground:'#1d1d1b', accent:'#1d1d1b', label:'ZIXIAN / DRAFT' };
 let currentUser = null;
@@ -106,6 +107,13 @@ async function downloadPreviewPng(actions) {
   download.download = 'zixian.png';
   download.click();
   setTimeout(() => URL.revokeObjectURL(download.href), 1000);
+}
+
+async function requestCloudRender(documentId, versionId) {
+  showToast('正在云端生成高清图…');
+  const output = await api(`/api/documents/${documentId}/exports`, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() }, body: JSON.stringify({ versionId }) });
+  await loadWallet();
+  window.location.assign(output.downloadUrl);
 }
 
 function showGeneratedDocument() {
@@ -423,11 +431,9 @@ document.querySelector('#conversation').addEventListener('click', async event =>
         await downloadPreviewPng(actions);
         showToast('高清图已开始下载');
       } catch {
-        if (!window.confirm('本地合成不可用。使用云端合成将扣除 1 积分，是否继续？')) return;
-        showToast('正在云端生成高清图…');
-        const output = await api(`/api/documents/${documentId}/exports`, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() }, body: JSON.stringify({ versionId }) });
-        await loadWallet();
-        window.location.assign(output.downloadUrl);
+        cloudRenderDialog.dataset.documentId = documentId;
+        cloudRenderDialog.dataset.versionId = versionId;
+        cloudRenderDialog.showModal();
       }
     }
     if (button.dataset.outputAction === 'style') {
@@ -517,6 +523,20 @@ document.querySelector('#publications-results').addEventListener('click', async 
 });
 document.querySelector('#close-dialog').addEventListener('click', () => document.querySelector('#share-dialog').close());
 document.querySelector('#close-publish-style').addEventListener('click', () => document.querySelector('#publish-style-dialog').close());
+document.querySelector('#close-cloud-render').addEventListener('click', () => cloudRenderDialog.close());
+document.querySelector('#cancel-cloud-render').addEventListener('click', () => cloudRenderDialog.close());
+document.querySelector('#confirm-cloud-render').addEventListener('click', async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    await requestCloudRender(cloudRenderDialog.dataset.documentId, cloudRenderDialog.dataset.versionId);
+    cloudRenderDialog.close();
+  } catch (error) {
+    showToast(error.code === 'insufficient_credits' ? '积分不足，请先充值' : '截图服务暂不可用，已自动退回积分');
+  } finally {
+    button.disabled = false;
+  }
+});
 document.querySelector('#publish-style-form').addEventListener('submit', async event => {
   event.preventDefault();
   const dialog = document.querySelector('#publish-style-dialog');
