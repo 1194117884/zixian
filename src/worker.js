@@ -47,7 +47,7 @@ async function adminMe(request, env) {
 async function adminOverview(request, env) {
   const identity = await adminUser(request, env);
   if (identity.error) return json({ error: identity.error }, { status: identity.error === 'unauthorized' ? 401 : 403 });
-  const [users, documents, generations, credits, usersToday, documentsToday, recent, channelRuns, activeCreators, tokenTotals, testOrders, liveRevenue, channelSummary] = await env.DB.batch([
+  const [users, documents, generations, credits, usersToday, documentsToday, recent, channelRuns, activeCreators, tokenTotals, testOrders, liveRevenue, channelSummary, auditLogs] = await env.DB.batch([
     env.DB.prepare('SELECT COUNT(*) AS count FROM users'),
     env.DB.prepare('SELECT COUNT(*) AS count FROM documents'),
     env.DB.prepare("SELECT COUNT(*) AS count FROM generation_jobs WHERE status = 'succeeded'"),
@@ -60,7 +60,8 @@ async function adminOverview(request, env) {
     env.DB.prepare("SELECT COALESCE(SUM(input_tokens), 0) AS inputTokens, COALESCE(SUM(output_tokens), 0) AS outputTokens FROM generation_jobs WHERE status = 'succeeded' AND created_at >= datetime('now', '-30 days')"),
     env.DB.prepare("SELECT COUNT(*) AS count FROM payment_orders WHERE payment_mode = 'test' AND status = 'succeeded'"),
     env.DB.prepare("SELECT COALESCE(SUM(amount_cents), 0) AS amountCents FROM payment_orders WHERE payment_mode = 'live' AND status = 'succeeded'"),
-    env.DB.prepare("SELECT provider_platform AS providerPlatform, provider_model_name AS providerModelName, COUNT(*) AS requests, SUM(CASE WHEN http_status BETWEEN 200 AND 299 THEN 1 ELSE 0 END) AS successes, COALESCE(SUM(input_tokens), 0) AS inputTokens, COALESCE(SUM(output_tokens), 0) AS outputTokens FROM generation_attempts WHERE created_at >= datetime('now', '-30 days') GROUP BY provider_platform, provider_model_name ORDER BY requests DESC LIMIT 12")
+    env.DB.prepare("SELECT provider_platform AS providerPlatform, provider_model_name AS providerModelName, COUNT(*) AS requests, SUM(CASE WHEN http_status BETWEEN 200 AND 299 THEN 1 ELSE 0 END) AS successes, COALESCE(SUM(input_tokens), 0) AS inputTokens, COALESCE(SUM(output_tokens), 0) AS outputTokens FROM generation_attempts WHERE created_at >= datetime('now', '-30 days') GROUP BY provider_platform, provider_model_name ORDER BY requests DESC LIMIT 12"),
+    env.DB.prepare('SELECT a.action, a.target_type AS targetType, a.target_id AS targetId, a.detail_json AS detailJson, a.created_at AS createdAt, u.email AS email FROM admin_audit_logs a LEFT JOIN users u ON u.id = a.admin_user_id ORDER BY a.created_at DESC LIMIT 20')
   ]);
   return json({
     totals: { users: users.results[0].count, documents: documents.results[0].count, generations: generations.results[0].count, creditsUsed: credits.results[0].count },
@@ -69,7 +70,8 @@ async function adminOverview(request, env) {
     orders: { testCount: testOrders.results[0].count, liveRevenueCents: liveRevenue.results[0].amountCents },
     recentGenerations: (recent.results || []).map(item => ({ ...item, modelLabel: modelCatalog[item.modelId]?.label || item.modelId })),
     recentChannelRuns: (channelRuns.results || []).map(item => ({ ...item, modelLabel: modelCatalog[item.modelId]?.label || item.modelId })),
-    channelSummary: channelSummary.results || []
+    channelSummary: channelSummary.results || [],
+    auditLogs: (auditLogs.results || []).map(log => ({ ...log, detail: (() => { try { return JSON.parse(log.detailJson); } catch { return {}; } })() }))
   });
 }
 

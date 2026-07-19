@@ -42,6 +42,18 @@ function renderModeration(styles) {
   container.innerHTML = styles.map(style => `<article data-style-id="${escapeHtml(style.id)}">${style.previewUrl ? `<img src="${escapeHtml(style.previewUrl)}" alt="">` : ''}<div><b>${escapeHtml(style.title)}</b><small>${escapeHtml(style.author || '匿名用户')} · ${style.moderationStatus === 'hidden' ? '已下架' : '公开中'} · 使用 ${style.uses} · 喜欢 ${style.likes}</small><p>${escapeHtml(style.description || '无描述')}</p></div><div class="moderation-actions"><button data-status="${style.moderationStatus === 'hidden' ? 'approved' : 'hidden'}">${style.moderationStatus === 'hidden' ? '恢复上架' : '下架'}</button></div></article>`).join('');
 }
 
+function auditLabel(log) {
+  if (log.targetType === 'ai_config') return `更新 AI 渠道（${log.detail.accountCount || 0} 条）`;
+  if (log.targetType === 'style_template') return log.detail.status === 'hidden' ? '下架社区风格' : '恢复社区风格上架';
+  return `${log.action} ${log.targetType}`;
+}
+
+function renderAuditLogs(logs) {
+  const container = document.querySelector('#audit-logs');
+  if (!logs.length) { container.innerHTML = '<p>还没有管理员操作记录。</p>'; return; }
+  container.innerHTML = logs.map(log => `<article><span>${escapeHtml(log.email || '管理员')}</span><b>${escapeHtml(auditLabel(log))}</b><small>${log.createdAt}</small></article>`).join('');
+}
+
 async function loadModeration() {
   const result = await api('/api/admin/styles');
   renderModeration(result.styles);
@@ -116,6 +128,7 @@ async function boot() {
     renderActivity(overview.recentGenerations);
     renderChannelRuns(overview.recentChannelRuns);
     renderUsageSummary(overview.thirtyDays, overview.channelSummary);
+    renderAuditLogs(overview.auditLogs);
     await loadModeration();
     fillAiConfig(aiConfig);
     denied.hidden = true;
