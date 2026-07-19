@@ -76,7 +76,11 @@ export function parseComposition(value) {
   };
 }
 
-function providerConfig(model, env, providerOverrides = {}) {
+function providerConfig(model, modelId, env, providerOverrides = {}) {
+  const configured = Array.isArray(providerOverrides.accounts)
+    ? providerOverrides.accounts.filter(account => account?.apiKey && account?.baseUrl && account?.tier === modelId)
+    : [];
+  if (Array.isArray(providerOverrides.accounts)) return { accounts: configured };
   if (model.provider === 'openai-compatible') {
     const deepseek = model.defaultModel.startsWith('deepseek-');
     const override = providerOverrides[deepseek ? 'deepseek' : 'openai'] || {};
@@ -116,19 +120,20 @@ function shouldFailover(status) {
 export async function generateComposition({ modelId, title, content, instruction, referenceDesign, history, revision = false, env, systemPromptOverride = systemPrompt, providerOverrides, requestKey, fetcher = fetch }) {
   const model = getModel(modelId);
   if (!model) throw new Error('unsupported_model');
-  const config = providerConfig(model, env, providerOverrides);
+  const config = providerConfig(model, modelId, env, providerOverrides);
   if (!config.accounts.length) throw new Error('model_unavailable');
   const prompt = createCompositionPrompt({ title, content, instruction, referenceDesign, revision });
   const messages = [...conversationMessages(history), { role: 'user', content: prompt }];
   for (const account of orderedAccounts(config.accounts, requestKey)) {
-    const request = model.provider === 'anthropic-compatible'
+    const anthropic = account.platform?.toLowerCase().includes('anthropic') || (!account.platform && model.provider === 'anthropic-compatible');
+    const request = anthropic
       ? {
           headers: { 'content-type': 'application/json', 'x-api-key': account.apiKey, 'anthropic-version': '2023-06-01' },
-          body: JSON.stringify({ model: model.defaultModel, max_tokens: 1400, system: systemPromptOverride, messages })
+          body: JSON.stringify({ model: account.modelName || model.defaultModel, max_tokens: 1400, system: systemPromptOverride, messages })
         }
       : {
           headers: { 'content-type': 'application/json', authorization: `Bearer ${account.apiKey}` },
-          body: JSON.stringify({ model: model.defaultModel, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: systemPromptOverride }, ...messages] })
+          body: JSON.stringify({ model: account.modelName || model.defaultModel, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: systemPromptOverride }, ...messages] })
         };
     try {
       const response = await fetcher(account.baseUrl, { method: 'POST', ...request });
@@ -137,7 +142,7 @@ export async function generateComposition({ modelId, title, content, instruction
         throw new Error('model_unavailable');
       }
       const body = await response.json();
-      const output = model.provider === 'anthropic-compatible' ? body.content?.[0]?.text : body.choices?.[0]?.message?.content;
+      const output = anthropic ? body.content?.[0]?.text : body.choices?.[0]?.message?.content;
       return parseComposition(output);
     } catch (error) {
       if (error.message === 'model_unavailable') throw error;

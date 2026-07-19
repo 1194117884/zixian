@@ -64,11 +64,12 @@ async function adminOverview(request, env) {
 }
 
 const aiConfigKey = 'ai_config';
-const providerDefaults = {
-  deepseek: 'https://api.deepseek.com/v1/chat/completions',
-  openai: 'https://api.openai.com/v1/chat/completions',
-  anthropic: 'https://api.anthropic.com/v1/messages'
+const legacyProviders = {
+  deepseek: { platform: 'DeepSeek', tier: 'fast', modelName: 'deepseek-v4-flash', baseUrl: 'https://api.deepseek.com/v1/chat/completions', envKey: 'DEEPSEEK_API_KEY' },
+  openai: { platform: 'OpenAI', tier: 'precise', modelName: 'gpt-5-mini', baseUrl: 'https://api.openai.com/v1/chat/completions', envKey: 'OPENAI_API_KEY' },
+  anthropic: { platform: 'Anthropic', tier: 'studio', modelName: 'claude-sonnet-4', baseUrl: 'https://api.anthropic.com/v1/messages', envKey: 'ANTHROPIC_API_KEY' }
 };
+const validTiers = new Set(Object.keys(modelCatalog));
 const encodeBase64 = value => btoa(String.fromCharCode(...new Uint8Array(value)));
 const decodeBase64 = value => Uint8Array.from(atob(value), character => character.charCodeAt(0));
 
@@ -103,23 +104,26 @@ function validProviderUrl(value) {
 async function readAiConfig(env, includeSecrets = false) {
   const row = await env.DB.prepare('SELECT value_json AS valueJson FROM app_settings WHERE setting_key = ?').bind(aiConfigKey).first();
   const stored = (() => { try { return JSON.parse(row?.valueJson || '{}'); } catch { return {}; } })();
-  const providers = {};
-  for (const [name, fallbackUrl] of Object.entries(providerDefaults)) {
+  const legacyAccounts = Object.entries(legacyProviders).flatMap(([name, defaults]) => {
     const entry = stored.providers?.[name] || {};
-    const envKey = name === 'deepseek' ? env.DEEPSEEK_API_KEY : name === 'openai' ? env.OPENAI_API_KEY : env.ANTHROPIC_API_KEY;
-    const configuredAccounts = Array.isArray(entry.accounts) ? entry.accounts : entry.encryptedKey ? [{ id: 'legacy', label: '默认账号', baseUrl: entry.baseUrl, encryptedKey: entry.encryptedKey }] : [];
-    const accounts = [];
-    for (const account of configuredAccounts.slice(0, 12)) {
-      const baseUrl = validProviderUrl(account?.baseUrl);
-      const apiKey = await decryptConfigValue(account?.encryptedKey, env.ADMIN_CONFIG_KEY);
-      if (!baseUrl || !apiKey) continue;
-      accounts.push({ id: typeof account.id === 'string' ? account.id : id(), label: typeof account.label === 'string' && account.label.trim() ? account.label.trim().slice(0, 40) : '未命名账号', baseUrl, ...(includeSecrets ? { apiKey } : {}) });
-    }
-    if (!accounts.length && envKey) accounts.push({ id: 'worker-secret', label: 'Worker Secret', baseUrl: fallbackUrl, ...(includeSecrets ? { apiKey: envKey } : {}) });
-    providers[name] = { accounts: accounts.map(({ apiKey, ...account }) => ({ ...account, keyConfigured: true })) };
-    if (includeSecrets) providers[name].accounts = accounts;
+    const accounts = Array.isArray(entry.accounts) ? entry.accounts : entry.encryptedKey ? [{ id: `legacy-${name}`, label: '默认账号', baseUrl: entry.baseUrl, encryptedKey: entry.encryptedKey }] : [];
+    return accounts.map(account => ({ ...defaults, ...account }));
+  });
+  const configuredAccounts = Array.isArray(stored.accounts) ? stored.accounts : legacyAccounts;
+  const accounts = [];
+  for (const account of configuredAccounts.slice(0, 36)) {
+    const baseUrl = validProviderUrl(account?.baseUrl);
+    const apiKey = await decryptConfigValue(account?.encryptedKey, env.ADMIN_CONFIG_KEY);
+    if (!baseUrl || !apiKey || !validTiers.has(account?.tier)) continue;
+    accounts.push({ id: typeof account.id === 'string' ? account.id : id(), platform: typeof account.platform === 'string' ? account.platform.slice(0, 40) : '', modelName: typeof account.modelName === 'string' ? account.modelName.slice(0, 100) : '', tier: account.tier, baseUrl, ...(includeSecrets ? { apiKey } : {}) });
   }
-  return { systemPrompt: typeof stored.systemPrompt === 'string' && stored.systemPrompt.trim() ? stored.systemPrompt : systemPrompt, providers };
+  if (!accounts.length) {
+    for (const defaults of Object.values(legacyProviders)) {
+      const apiKey = env[defaults.envKey];
+      if (apiKey) accounts.push({ id: `worker-${defaults.tier}`, ...defaults, ...(includeSecrets ? { apiKey } : {}) });
+    }
+  }
+  return { systemPrompt: typeof stored.systemPrompt === 'string' && stored.systemPrompt.trim() ? stored.systemPrompt : systemPrompt, accounts: accounts.map(({ apiKey, envKey, ...account }) => ({ ...account, keyConfigured: true, ...(includeSecrets ? { apiKey } : {}) })) };
 }
 
 async function adminAiConfig(request, env) {
@@ -128,32 +132,33 @@ async function adminAiConfig(request, env) {
   if (request.method === 'GET') return json(await readAiConfig(env));
   const payload = await request.json().catch(() => null);
   if (!payload || typeof payload.systemPrompt !== 'string' || !payload.systemPrompt.trim() || payload.systemPrompt.length > 12000) return badRequest('valid system prompt is required');
-  const current = await readAiConfig(env);
   const existing = await env.DB.prepare('SELECT value_json AS valueJson FROM app_settings WHERE setting_key = ?').bind(aiConfigKey).first();
   const existingConfig = (() => { try { return JSON.parse(existing?.valueJson || '{}'); } catch { return {}; } })();
-  const stored = { systemPrompt: payload.systemPrompt.trim(), providers: {} };
-  for (const [name] of Object.entries(providerDefaults)) {
-    const inputAccounts = Array.isArray(payload.providers?.[name]?.accounts) ? payload.providers[name].accounts.slice(0, 12) : [];
-    const oldAccounts = Array.isArray(existingConfig.providers?.[name]?.accounts) ? existingConfig.providers[name].accounts : existingConfig.providers?.[name]?.encryptedKey ? [{ id: 'legacy', encryptedKey: existingConfig.providers[name].encryptedKey }] : [];
-    const accounts = [];
-    for (const input of inputAccounts) {
-      const baseUrl = validProviderUrl(input?.baseUrl);
-      if (!baseUrl) return badRequest(`valid ${name} endpoint is required`);
-      const accountId = typeof input.id === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(input.id) ? input.id : id();
-      const previous = oldAccounts.find(account => account.id === accountId);
-      const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
-      let encryptedKey = previous?.encryptedKey || '';
-      if (apiKey) {
-        try { encryptedKey = await encryptConfigValue(apiKey, env.ADMIN_CONFIG_KEY); } catch { return json({ error: 'config_secret_unavailable' }, { status: 409 }); }
-      }
-      if (!encryptedKey) return badRequest(`API Key is required for ${name} account`);
-      accounts.push({ id: accountId, label: typeof input.label === 'string' ? input.label.trim().slice(0, 40) : '', baseUrl, encryptedKey });
+  const oldAccounts = Array.isArray(existingConfig.accounts) ? existingConfig.accounts : Object.entries(legacyProviders).flatMap(([name, defaults]) => {
+    const entry = existingConfig.providers?.[name] || {};
+    const accounts = Array.isArray(entry.accounts) ? entry.accounts : entry.encryptedKey ? [{ id: `legacy-${name}`, baseUrl: entry.baseUrl, encryptedKey: entry.encryptedKey }] : [];
+    return accounts.map(account => ({ ...defaults, ...account }));
+  });
+  const stored = { systemPrompt: payload.systemPrompt.trim(), accounts: [] };
+  const inputAccounts = Array.isArray(payload.accounts) ? payload.accounts.slice(0, 36) : [];
+  for (const input of inputAccounts) {
+    const baseUrl = validProviderUrl(input?.baseUrl);
+    const platform = typeof input?.platform === 'string' ? input.platform.trim().slice(0, 40) : '';
+    const modelName = typeof input?.modelName === 'string' ? input.modelName.trim().slice(0, 100) : '';
+    if (!baseUrl || !platform || !modelName || !validTiers.has(input?.tier)) return badRequest('platform, endpoint, model name, and tier are required');
+    const accountId = typeof input.id === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(input.id) ? input.id : id();
+    const previous = oldAccounts.find(account => account.id === accountId);
+    const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
+    let encryptedKey = previous?.encryptedKey || '';
+    if (apiKey) {
+      try { encryptedKey = await encryptConfigValue(apiKey, env.ADMIN_CONFIG_KEY); } catch { return json({ error: 'config_secret_unavailable' }, { status: 409 }); }
     }
-    stored.providers[name] = { accounts };
+    if (!encryptedKey) return badRequest('API Key is required for every channel');
+    stored.accounts.push({ id: accountId, platform, modelName, tier: input.tier, baseUrl, encryptedKey });
   }
   await env.DB.batch([
     env.DB.prepare('INSERT INTO app_settings (setting_key, value_json, updated_by) VALUES (?, ?, ?) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP').bind(aiConfigKey, JSON.stringify(stored), identity.user.id),
-    env.DB.prepare('INSERT INTO admin_audit_logs (id, admin_user_id, action, target_type, target_id, detail_json) VALUES (?, ?, ?, ?, ?, ?)').bind(id(), identity.user.id, 'update', 'ai_config', aiConfigKey, JSON.stringify({ providers: Object.keys(stored.providers) }))
+    env.DB.prepare('INSERT INTO admin_audit_logs (id, admin_user_id, action, target_type, target_id, detail_json) VALUES (?, ?, ?, ?, ?, ?)').bind(id(), identity.user.id, 'update', 'ai_config', aiConfigKey, JSON.stringify({ accountCount: stored.accounts.length }))
   ]);
   return json(await readAiConfig(env));
 }

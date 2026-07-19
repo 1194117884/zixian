@@ -102,7 +102,7 @@ test('model adapter spreads requests across accounts and fails over after a rate
   const attempts = [];
   const composition = await generateComposition({
     modelId: 'fast', title: '标题', content: '内容', instruction: '', requestKey: 'b', env: {},
-    providerOverrides: { deepseek: { accounts: [{ apiKey: 'first', baseUrl: 'https://one.example/chat' }, { apiKey: 'second', baseUrl: 'https://two.example/chat' }] } },
+    providerOverrides: { accounts: [{ platform: 'DeepSeek', tier: 'fast', modelName: 'deepseek-chat', apiKey: 'first', baseUrl: 'https://one.example/chat' }, { platform: 'DeepSeek', tier: 'fast', modelName: 'deepseek-chat', apiKey: 'second', baseUrl: 'https://two.example/chat' }] },
     fetcher: async (url, options) => {
       attempts.push({ url, key: options.headers.authorization });
       if (attempts.length === 1) return new Response('busy', { status: 429 });

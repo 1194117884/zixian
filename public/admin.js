@@ -24,26 +24,22 @@ function renderActivity(items) {
 
 function fillAiConfig(config) {
   document.querySelector('#system-prompt').value = config.systemPrompt;
-  for (const [name, provider] of Object.entries(config.providers)) {
-    renderProviderAccounts(name, provider.accounts);
-  }
+  renderAccounts(config.accounts);
 }
 
-function renderProviderAccounts(name, accounts = []) {
-  const container = document.querySelector(`#${name}-accounts`);
-  const editable = accounts.filter(account => account.id !== 'worker-secret');
-  const workerSecret = accounts.some(account => account.id === 'worker-secret');
-  container.innerHTML = editable.map(account => `<div class="account-row" data-id="${escapeHtml(account.id)}"><input data-field="label" value="${escapeHtml(account.label)}" maxlength="40" placeholder="账号名称"><input data-field="baseUrl" type="url" value="${escapeHtml(account.baseUrl)}" placeholder="https://..."><input data-field="apiKey" type="password" autocomplete="new-password" placeholder="新的 API Key（留空不变）"><button type="button" class="remove-account">移除</button></div>`).join('') || `<small>${workerSecret ? '当前使用 Worker Secret；添加账号后将改用后台账号池。' : '尚未配置账号。'}</small>`;
+function accountRow(account = {}) {
+  return `<div class="account-row" data-id="${escapeHtml(account.id || '')}"><input data-field="platform" value="${escapeHtml(account.platform || '')}" maxlength="40" placeholder="平台，如 DeepSeek"><input data-field="baseUrl" type="url" value="${escapeHtml(account.baseUrl || '')}" placeholder="接口地址 https://..."><input data-field="modelName" value="${escapeHtml(account.modelName || '')}" maxlength="100" placeholder="模型名称"><input data-field="apiKey" type="password" autocomplete="new-password" placeholder="${account.id ? '新的 API Key（留空不变）' : 'API Key'}"><select data-field="tier"><option value="fast" ${account.tier === 'fast' ? 'selected' : ''}>快速创作</option><option value="precise" ${account.tier === 'precise' ? 'selected' : ''}>精致排版</option><option value="studio" ${account.tier === 'studio' ? 'selected' : ''}>旗舰创作</option></select><button type="button" class="remove-account">移除</button></div>`;
 }
 
-function addProviderAccount(name) {
-  const container = document.querySelector(`#${name}-accounts`);
+function renderAccounts(accounts = []) {
+  const container = document.querySelector('#model-accounts');
+  container.innerHTML = accounts.map(accountRow).join('') || '<small>尚未配置模型渠道。</small>';
+}
+
+function addAccount() {
+  const container = document.querySelector('#model-accounts');
   container.querySelector('small')?.remove();
-  const row = document.createElement('div');
-  row.className = 'account-row';
-  row.dataset.id = '';
-  row.innerHTML = '<input data-field="label" maxlength="40" placeholder="账号名称"><input data-field="baseUrl" type="url" placeholder="https://..."><input data-field="apiKey" type="password" autocomplete="new-password" placeholder="API Key"><button type="button" class="remove-account">移除</button>';
-  container.append(row);
+  container.insertAdjacentHTML('beforeend', accountRow());
 }
 
 async function saveAiConfig(event) {
@@ -52,19 +48,16 @@ async function saveAiConfig(event) {
   const message = document.querySelector('#config-message');
   button.disabled = true;
   message.textContent = '正在保存…';
-  const providers = {};
-  for (const name of ['deepseek', 'openai', 'anthropic']) {
-    providers[name] = {
-      accounts: [...document.querySelectorAll(`#${name}-accounts .account-row`)].map(row => ({
-        id: row.dataset.id,
-        label: row.querySelector('[data-field="label"]').value,
-        baseUrl: row.querySelector('[data-field="baseUrl"]').value,
-        apiKey: row.querySelector('[data-field="apiKey"]').value
-      }))
-    };
-  }
+  const accounts = [...document.querySelectorAll('#model-accounts .account-row')].map(row => ({
+    id: row.dataset.id,
+    platform: row.querySelector('[data-field="platform"]').value,
+    baseUrl: row.querySelector('[data-field="baseUrl"]').value,
+    modelName: row.querySelector('[data-field="modelName"]').value,
+    apiKey: row.querySelector('[data-field="apiKey"]').value,
+    tier: row.querySelector('[data-field="tier"]').value
+  }));
   try {
-    const config = await api('/api/admin/ai-config', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ systemPrompt: document.querySelector('#system-prompt').value, providers }) });
+    const config = await api('/api/admin/ai-config', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ systemPrompt: document.querySelector('#system-prompt').value, accounts }) });
     fillAiConfig(config);
     document.querySelectorAll('.account-row [data-field="apiKey"]').forEach(input => { input.value = ''; });
     message.textContent = '已保存，后续生成会使用新配置。';
@@ -95,8 +88,8 @@ async function boot() {
 }
 
 document.querySelector('#ai-config-form').addEventListener('submit', saveAiConfig);
-document.querySelector('.provider-grid').addEventListener('click', event => {
-  if (event.target.matches('.add-account')) addProviderAccount(event.target.dataset.provider);
+document.querySelector('#ai-config-form').addEventListener('click', event => {
+  if (event.target.matches('.add-account')) addAccount();
   if (event.target.matches('.remove-account')) event.target.closest('.account-row').remove();
 });
 boot();
