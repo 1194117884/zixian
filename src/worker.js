@@ -106,10 +106,18 @@ async function readAiConfig(env, includeSecrets = false) {
   const providers = {};
   for (const [name, fallbackUrl] of Object.entries(providerDefaults)) {
     const entry = stored.providers?.[name] || {};
-    const baseUrl = validProviderUrl(entry.baseUrl) || fallbackUrl;
     const envKey = name === 'deepseek' ? env.DEEPSEEK_API_KEY : name === 'openai' ? env.OPENAI_API_KEY : env.ANTHROPIC_API_KEY;
-    providers[name] = { baseUrl, keyConfigured: Boolean(entry.encryptedKey || envKey) };
-    if (includeSecrets) providers[name].apiKey = await decryptConfigValue(entry.encryptedKey, env.ADMIN_CONFIG_KEY) || envKey || '';
+    const configuredAccounts = Array.isArray(entry.accounts) ? entry.accounts : entry.encryptedKey ? [{ id: 'legacy', label: '默认账号', baseUrl: entry.baseUrl, encryptedKey: entry.encryptedKey }] : [];
+    const accounts = [];
+    for (const account of configuredAccounts.slice(0, 12)) {
+      const baseUrl = validProviderUrl(account?.baseUrl);
+      const apiKey = await decryptConfigValue(account?.encryptedKey, env.ADMIN_CONFIG_KEY);
+      if (!baseUrl || !apiKey) continue;
+      accounts.push({ id: typeof account.id === 'string' ? account.id : id(), label: typeof account.label === 'string' && account.label.trim() ? account.label.trim().slice(0, 40) : '未命名账号', baseUrl, ...(includeSecrets ? { apiKey } : {}) });
+    }
+    if (!accounts.length && envKey) accounts.push({ id: 'worker-secret', label: 'Worker Secret', baseUrl: fallbackUrl, ...(includeSecrets ? { apiKey: envKey } : {}) });
+    providers[name] = { accounts: accounts.map(({ apiKey, ...account }) => ({ ...account, keyConfigured: true })) };
+    if (includeSecrets) providers[name].accounts = accounts;
   }
   return { systemPrompt: typeof stored.systemPrompt === 'string' && stored.systemPrompt.trim() ? stored.systemPrompt : systemPrompt, providers };
 }
@@ -124,15 +132,24 @@ async function adminAiConfig(request, env) {
   const existing = await env.DB.prepare('SELECT value_json AS valueJson FROM app_settings WHERE setting_key = ?').bind(aiConfigKey).first();
   const existingConfig = (() => { try { return JSON.parse(existing?.valueJson || '{}'); } catch { return {}; } })();
   const stored = { systemPrompt: payload.systemPrompt.trim(), providers: {} };
-  for (const [name, fallbackUrl] of Object.entries(providerDefaults)) {
-    const input = payload.providers?.[name] || {};
-    const baseUrl = validProviderUrl(input.baseUrl) || current.providers[name].baseUrl || fallbackUrl;
-    const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
-    let encryptedKey = existingConfig.providers?.[name]?.encryptedKey || '';
-    if (apiKey) {
-      try { encryptedKey = await encryptConfigValue(apiKey, env.ADMIN_CONFIG_KEY); } catch { return json({ error: 'config_secret_unavailable' }, { status: 409 }); }
+  for (const [name] of Object.entries(providerDefaults)) {
+    const inputAccounts = Array.isArray(payload.providers?.[name]?.accounts) ? payload.providers[name].accounts.slice(0, 12) : [];
+    const oldAccounts = Array.isArray(existingConfig.providers?.[name]?.accounts) ? existingConfig.providers[name].accounts : existingConfig.providers?.[name]?.encryptedKey ? [{ id: 'legacy', encryptedKey: existingConfig.providers[name].encryptedKey }] : [];
+    const accounts = [];
+    for (const input of inputAccounts) {
+      const baseUrl = validProviderUrl(input?.baseUrl);
+      if (!baseUrl) return badRequest(`valid ${name} endpoint is required`);
+      const accountId = typeof input.id === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(input.id) ? input.id : id();
+      const previous = oldAccounts.find(account => account.id === accountId);
+      const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
+      let encryptedKey = previous?.encryptedKey || '';
+      if (apiKey) {
+        try { encryptedKey = await encryptConfigValue(apiKey, env.ADMIN_CONFIG_KEY); } catch { return json({ error: 'config_secret_unavailable' }, { status: 409 }); }
+      }
+      if (!encryptedKey) return badRequest(`API Key is required for ${name} account`);
+      accounts.push({ id: accountId, label: typeof input.label === 'string' ? input.label.trim().slice(0, 40) : '', baseUrl, encryptedKey });
     }
-    stored.providers[name] = { baseUrl, encryptedKey };
+    stored.providers[name] = { accounts };
   }
   await env.DB.batch([
     env.DB.prepare('INSERT INTO app_settings (setting_key, value_json, updated_by) VALUES (?, ?, ?) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP').bind(aiConfigKey, JSON.stringify(stored), identity.user.id),
@@ -482,6 +499,7 @@ async function createGenerationJob(request, env) {
         revision: Boolean(existingDocument),
         systemPromptOverride: aiConfig.systemPrompt,
         providerOverrides: aiConfig.providers,
+        requestKey: reservation.job.id,
         env
       });
       const generatedContent = [...composition.paragraphs, composition.highlight].join('\n\n');

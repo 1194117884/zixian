@@ -98,6 +98,23 @@ test('model adapter requests constrained JSON and never accepts HTML output dire
   assert.deepEqual(composition, { title: '标题', paragraphs: ['正文'], highlight: '重点', design: { background: '#113355', foreground: '#ffffff', accent: '#ffcc00', label: 'MY DESIGN' } });
 });
 
+test('model adapter spreads requests across accounts and fails over after a rate limit', async () => {
+  const attempts = [];
+  const composition = await generateComposition({
+    modelId: 'fast', title: '标题', content: '内容', instruction: '', requestKey: 'b', env: {},
+    providerOverrides: { deepseek: { accounts: [{ apiKey: 'first', baseUrl: 'https://one.example/chat' }, { apiKey: 'second', baseUrl: 'https://two.example/chat' }] } },
+    fetcher: async (url, options) => {
+      attempts.push({ url, key: options.headers.authorization });
+      if (attempts.length === 1) return new Response('busy', { status: 429 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"title":"标题","paragraphs":["正文"],"highlight":"重点"}' } }] }), { status: 200 });
+    }
+  });
+
+  assert.equal(attempts.length, 2);
+  assert.notEqual(attempts[0].key, attempts[1].key);
+  assert.equal(composition.title, '标题');
+});
+
 test('export uses a fixed R2 key and stores Browser Run PNG output', async () => {
   const browser = { quickAction: async (action, request) => {
     assert.equal(action, 'screenshot');

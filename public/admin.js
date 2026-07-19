@@ -12,6 +12,10 @@ function text(id, value) {
   document.querySelector(id).textContent = value;
 }
 
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+}
+
 function renderActivity(items) {
   const container = document.querySelector('#recent-activity');
   if (!items.length) { container.innerHTML = '<p>还没有生成记录。</p>'; return; }
@@ -19,11 +23,27 @@ function renderActivity(items) {
 }
 
 function fillAiConfig(config) {
-  text('#system-prompt', config.systemPrompt);
+  document.querySelector('#system-prompt').value = config.systemPrompt;
   for (const [name, provider] of Object.entries(config.providers)) {
-    document.querySelector(`[data-provider="${name}"][data-field="baseUrl"]`).value = provider.baseUrl;
-    text(`#${name}-status`, provider.keyConfigured ? '已配置 Key' : '使用 Worker Secret 或尚未配置');
+    renderProviderAccounts(name, provider.accounts);
   }
+}
+
+function renderProviderAccounts(name, accounts = []) {
+  const container = document.querySelector(`#${name}-accounts`);
+  const editable = accounts.filter(account => account.id !== 'worker-secret');
+  const workerSecret = accounts.some(account => account.id === 'worker-secret');
+  container.innerHTML = editable.map(account => `<div class="account-row" data-id="${escapeHtml(account.id)}"><input data-field="label" value="${escapeHtml(account.label)}" maxlength="40" placeholder="账号名称"><input data-field="baseUrl" type="url" value="${escapeHtml(account.baseUrl)}" placeholder="https://..."><input data-field="apiKey" type="password" autocomplete="new-password" placeholder="新的 API Key（留空不变）"><button type="button" class="remove-account">移除</button></div>`).join('') || `<small>${workerSecret ? '当前使用 Worker Secret；添加账号后将改用后台账号池。' : '尚未配置账号。'}</small>`;
+}
+
+function addProviderAccount(name) {
+  const container = document.querySelector(`#${name}-accounts`);
+  container.querySelector('small')?.remove();
+  const row = document.createElement('div');
+  row.className = 'account-row';
+  row.dataset.id = '';
+  row.innerHTML = '<input data-field="label" maxlength="40" placeholder="账号名称"><input data-field="baseUrl" type="url" placeholder="https://..."><input data-field="apiKey" type="password" autocomplete="new-password" placeholder="API Key"><button type="button" class="remove-account">移除</button>';
+  container.append(row);
 }
 
 async function saveAiConfig(event) {
@@ -35,14 +55,18 @@ async function saveAiConfig(event) {
   const providers = {};
   for (const name of ['deepseek', 'openai', 'anthropic']) {
     providers[name] = {
-      baseUrl: document.querySelector(`[data-provider="${name}"][data-field="baseUrl"]`).value,
-      apiKey: document.querySelector(`[data-provider="${name}"][data-field="apiKey"]`).value
+      accounts: [...document.querySelectorAll(`#${name}-accounts .account-row`)].map(row => ({
+        id: row.dataset.id,
+        label: row.querySelector('[data-field="label"]').value,
+        baseUrl: row.querySelector('[data-field="baseUrl"]').value,
+        apiKey: row.querySelector('[data-field="apiKey"]').value
+      }))
     };
   }
   try {
     const config = await api('/api/admin/ai-config', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ systemPrompt: document.querySelector('#system-prompt').value, providers }) });
     fillAiConfig(config);
-    document.querySelectorAll('[data-field="apiKey"]').forEach(input => { input.value = ''; });
+    document.querySelectorAll('.account-row [data-field="apiKey"]').forEach(input => { input.value = ''; });
     message.textContent = '已保存，后续生成会使用新配置。';
   } catch (error) {
     message.textContent = error.message === 'config_secret_unavailable' ? '请先配置 Worker Secret：ADMIN_CONFIG_KEY。' : '保存失败，请检查配置。';
@@ -71,4 +95,8 @@ async function boot() {
 }
 
 document.querySelector('#ai-config-form').addEventListener('submit', saveAiConfig);
+document.querySelector('.provider-grid').addEventListener('click', event => {
+  if (event.target.matches('.add-account')) addProviderAccount(event.target.dataset.provider);
+  if (event.target.matches('.remove-account')) event.target.closest('.account-row').remove();
+});
 boot();
