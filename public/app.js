@@ -79,6 +79,7 @@ function addPreviewToMessage(message, documentVersion) {
   const iframe = document.createElement('iframe');
   iframe.title = `第 ${versionCount} 版作品预览`;
   iframe.sandbox = 'allow-same-origin';
+  iframe.setAttribute('scrolling', 'no');
   iframe.style.cssText = `display:block;width:${cloudPreviewViewport.width}px;height:${cloudPreviewViewport.height}px;border:0;background:#fff;transform-origin:top left;`;
   iframe.src = `/api/documents/${encodeURIComponent(documentVersion.id)}/versions/${encodeURIComponent(documentVersion.versionId)}/preview`;
   bubble.append(iframe);
