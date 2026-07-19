@@ -65,6 +65,12 @@ test('private document preview requires a signed session', async () => {
   assert.deepEqual(await response.json(), { error: 'unauthorized' });
 });
 
+test('admin endpoints require a signed administrator session', async () => {
+  const response = await worker.fetch(new Request('https://example.test/api/admin/overview'), {});
+
+  assert.equal(response.status, 401);
+});
+
 test('model composition only accepts a bounded structured response', () => {
   const prompt = createCompositionPrompt({ title: '标题', content: '内容', instruction: '' });
   const composition = parseComposition('{"title":"标题","paragraphs":["第一段","第二段"],"highlight":"重点"}');

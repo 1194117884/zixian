@@ -22,7 +22,9 @@
 本地填写 `.dev.vars`；该文件已被 Git 忽略。部署到 Cloudflare 后，敏感值使用 `wrangler secret put <变量名>` 或 Worker Dashboard 的 Secrets 配置，非敏感值使用环境变量配置。
 
 - Secrets：`AUTH_PEPPER`、`RESEND_API_KEY`、各模型 API Key
-- 非敏感配置：`RESEND_FROM`、`APP_ORIGIN`
+- 非敏感配置：`RESEND_FROM`、`APP_ORIGIN`、`ADMIN_EMAILS`
+
+`ADMIN_EMAILS` 以英文逗号分隔允许访问 `/admin.html` 的登录邮箱。管理员名单只在 Worker 服务端校验，不能由前端设置。
 
 当前登录发送由 Worker 的 IP/邮箱频率限制和同邮箱 60 秒冷却保护。面向中国大陆的独立人机验证服务会在后续接入。
 

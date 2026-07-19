@@ -29,6 +29,40 @@ function badRequest(message) {
   return json({ error: 'bad_request', message }, { status: 400 });
 }
 
+async function adminUser(request, env) {
+  const userId = await sessionUserId(request, env);
+  if (!userId) return { error: 'unauthorized' };
+  const user = await env.DB.prepare('SELECT id, email FROM users WHERE id = ?').bind(userId).first();
+  const allowedEmails = new Set((env.ADMIN_EMAILS || '').split(',').map(normalizeEmail).filter(Boolean));
+  if (!user?.email || !allowedEmails.has(normalizeEmail(user.email))) return { error: 'forbidden' };
+  return { user };
+}
+
+async function adminMe(request, env) {
+  const identity = await adminUser(request, env);
+  if (identity.error) return json({ error: identity.error }, { status: identity.error === 'unauthorized' ? 401 : 403 });
+  return json({ user: identity.user });
+}
+
+async function adminOverview(request, env) {
+  const identity = await adminUser(request, env);
+  if (identity.error) return json({ error: identity.error }, { status: identity.error === 'unauthorized' ? 401 : 403 });
+  const [users, documents, generations, credits, usersToday, documentsToday, recent] = await env.DB.batch([
+    env.DB.prepare('SELECT COUNT(*) AS count FROM users'),
+    env.DB.prepare('SELECT COUNT(*) AS count FROM documents'),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM generation_jobs WHERE status = 'succeeded'"),
+    env.DB.prepare("SELECT COALESCE(-SUM(amount), 0) AS count FROM credit_ledger WHERE reason IN ('generation', 'cloud_render')"),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM users WHERE created_at >= datetime('now', '-1 day')"),
+    env.DB.prepare("SELECT COUNT(*) AS count FROM documents WHERE created_at >= datetime('now', '-1 day')"),
+    env.DB.prepare("SELECT u.email, g.model_id AS modelId, g.cost_credits AS costCredits, g.created_at AS createdAt FROM generation_jobs g LEFT JOIN users u ON u.id = g.owner_id WHERE g.status = 'succeeded' ORDER BY g.created_at DESC LIMIT 12")
+  ]);
+  return json({
+    totals: { users: users.results[0].count, documents: documents.results[0].count, generations: generations.results[0].count, creditsUsed: credits.results[0].count },
+    today: { users: usersToday.results[0].count, documents: documentsToday.results[0].count },
+    recentGenerations: (recent.results || []).map(item => ({ ...item, modelLabel: modelCatalog[item.modelId]?.label || item.modelId }))
+  });
+}
+
 function validDocumentPayload(payload) {
   return payload && typeof payload.content === 'string' && payload.content.trim() && payload.content.length <= 10000;
 }
@@ -463,6 +497,9 @@ export default {
       const user = await env.DB.prepare('SELECT id, email FROM users WHERE id = ?').bind(currentUserId).first();
       return json({ user });
     }
+
+    if (request.method === 'GET' && url.pathname === '/api/admin/me') return adminMe(request, env);
+    if (request.method === 'GET' && url.pathname === '/api/admin/overview') return adminOverview(request, env);
 
     if (request.method === 'GET' && url.pathname === '/api/wallet') return wallet(request, env);
     if (request.method === 'POST' && url.pathname === '/api/test-payments') return testPayment(request, env);

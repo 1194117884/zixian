@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>字见 · 管理后台</title>
+    <link rel="stylesheet" href="/admin.css" />
+  </head>
+  <body>
+    <main class="shell" hidden>
+      <header><a href="/">字见</a><span>运营后台</span><small id="admin-email"></small></header>
+      <section class="intro"><p>运营概览</p><h1>今天，创作正在发生。</h1><span id="updated-at">正在加载…</span></section>
+      <section class="metrics" aria-live="polite">
+        <article><span>注册用户</span><strong id="users-count">—</strong><small id="users-new">—</small></article>
+        <article><span>保存作品</span><strong id="documents-count">—</strong><small id="documents-new">—</small></article>
+        <article><span>成功生成</span><strong id="generations-count">—</strong><small id="credits-used">—</small></article>
+        <article><span>订单收入</span><strong>待接入</strong><small>支付上线后统计</small></article>
+      </section>
+      <section class="panel"><div><p>近期生成活动</p><h2>模型与积分消耗</h2></div><div id="recent-activity" class="activity"></div></section>
+      <section class="panel next"><div><p>下一阶段</p><h2>系统配置与审核</h2></div><p>系统提示词、模型渠道、密钥状态、风格审核与下架将在这里统一管理。模型密钥不会发送到浏览器。</p></section>
+    </main>
+    <section id="access-denied" class="access"><p>字见 / 管理后台</p><h1>正在验证管理员权限…</h1><a href="/">返回创作台</a></section>
+    <script src="/admin.js"></script>
+  </body>
+</html>
