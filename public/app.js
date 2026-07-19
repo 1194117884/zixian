@@ -78,12 +78,16 @@ function addPreviewToMessage(message, documentVersion) {
 async function renderPreviewPng(actions) {
   const iframe = actions.previousElementSibling?.querySelector('iframe');
   const source = iframe?.contentDocument;
-  if (!source?.documentElement) throw new Error('client_export_unavailable');
-  const width = Math.max(source.documentElement.scrollWidth, source.documentElement.clientWidth);
-  const height = Math.max(source.documentElement.scrollHeight, source.documentElement.clientHeight);
+  if (!source?.body) throw new Error('client_export_unavailable');
+  const width = Math.max(source.documentElement.clientWidth, source.body.scrollWidth);
+  const height = Math.max(source.documentElement.scrollHeight, source.body.scrollHeight);
+  if (width < 1 || height < 1) throw new Error('client_export_unavailable');
   const outputWidth = 1080;
   const outputHeight = Math.ceil(height * outputWidth / width);
-  const markup = source.documentElement.outerHTML.replace('<html', '<html xmlns="http://www.w3.org/1999/xhtml"');
+  const styles = [...source.head.querySelectorAll('style')].map(style => style.textContent).join('\n')
+    .replace(/html\s*,\s*body\s*\{/g, '.zixian-export{')
+    .replace(/\bbody(?=\s*\{)/g, '.zixian-export');
+  const markup = `<div xmlns="http://www.w3.org/1999/xhtml" class="zixian-export"><style>${styles}</style>${source.body.innerHTML}</div>`;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${outputWidth}" height="${outputHeight}" viewBox="0 0 ${width} ${height}"><foreignObject width="${width}" height="${height}">${markup}</foreignObject></svg>`;
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
   const image = new Image();
