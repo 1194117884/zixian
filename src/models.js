@@ -125,7 +125,7 @@ export async function generateComposition({ modelId, title, content, instruction
   const prompt = createCompositionPrompt({ title, content, instruction, referenceDesign, revision });
   const messages = [...conversationMessages(history), { role: 'user', content: prompt }];
   for (const account of orderedAccounts(config.accounts, requestKey)) {
-    const anthropic = account.platform?.toLowerCase().includes('anthropic') || (!account.platform && model.provider === 'anthropic-compatible');
+    const anthropic = account.apiFormat === 'anthropic' || (!account.apiFormat && model.provider === 'anthropic-compatible');
     const request = anthropic
       ? {
           headers: { 'content-type': 'application/json', 'x-api-key': account.apiKey, 'anthropic-version': '2023-06-01' },

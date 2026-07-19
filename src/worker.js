@@ -65,9 +65,9 @@ async function adminOverview(request, env) {
 
 const aiConfigKey = 'ai_config';
 const legacyProviders = {
-  deepseek: { platform: 'DeepSeek', tier: 'fast', modelName: 'deepseek-v4-flash', baseUrl: 'https://api.deepseek.com/v1/chat/completions', envKey: 'DEEPSEEK_API_KEY' },
-  openai: { platform: 'OpenAI', tier: 'precise', modelName: 'gpt-5-mini', baseUrl: 'https://api.openai.com/v1/chat/completions', envKey: 'OPENAI_API_KEY' },
-  anthropic: { platform: 'Anthropic', tier: 'studio', modelName: 'claude-sonnet-4', baseUrl: 'https://api.anthropic.com/v1/messages', envKey: 'ANTHROPIC_API_KEY' }
+  deepseek: { platform: 'DeepSeek', apiFormat: 'openai', tier: 'fast', modelName: 'deepseek-v4-flash', baseUrl: 'https://api.deepseek.com/v1/chat/completions', envKey: 'DEEPSEEK_API_KEY' },
+  openai: { platform: 'OpenAI', apiFormat: 'openai', tier: 'precise', modelName: 'gpt-5-mini', baseUrl: 'https://api.openai.com/v1/chat/completions', envKey: 'OPENAI_API_KEY' },
+  anthropic: { platform: 'Anthropic', apiFormat: 'anthropic', tier: 'studio', modelName: 'claude-sonnet-4', baseUrl: 'https://api.anthropic.com/v1/messages', envKey: 'ANTHROPIC_API_KEY' }
 };
 const validTiers = new Set(Object.keys(modelCatalog));
 const encodeBase64 = value => btoa(String.fromCharCode(...new Uint8Array(value)));
@@ -115,7 +115,8 @@ async function readAiConfig(env, includeSecrets = false) {
     const baseUrl = validProviderUrl(account?.baseUrl);
     const apiKey = await decryptConfigValue(account?.encryptedKey, env.ADMIN_CONFIG_KEY);
     if (!baseUrl || !apiKey || !validTiers.has(account?.tier)) continue;
-    accounts.push({ id: typeof account.id === 'string' ? account.id : id(), platform: typeof account.platform === 'string' ? account.platform.slice(0, 40) : '', modelName: typeof account.modelName === 'string' ? account.modelName.slice(0, 100) : '', tier: account.tier, baseUrl, ...(includeSecrets ? { apiKey } : {}) });
+    const apiFormat = account?.apiFormat === 'anthropic' || (!account?.apiFormat && account?.platform?.toLowerCase().includes('anthropic')) ? 'anthropic' : 'openai';
+    accounts.push({ id: typeof account.id === 'string' ? account.id : id(), platform: typeof account.platform === 'string' ? account.platform.slice(0, 40) : '', apiFormat, modelName: typeof account.modelName === 'string' ? account.modelName.slice(0, 100) : '', tier: account.tier, baseUrl, ...(includeSecrets ? { apiKey } : {}) });
   }
   if (!accounts.length) {
     for (const defaults of Object.values(legacyProviders)) {
@@ -145,7 +146,8 @@ async function adminAiConfig(request, env) {
     const baseUrl = validProviderUrl(input?.baseUrl);
     const platform = typeof input?.platform === 'string' ? input.platform.trim().slice(0, 40) : '';
     const modelName = typeof input?.modelName === 'string' ? input.modelName.trim().slice(0, 100) : '';
-    if (!baseUrl || !platform || !modelName || !validTiers.has(input?.tier)) return badRequest('platform, endpoint, model name, and tier are required');
+    const apiFormat = input?.apiFormat === 'anthropic' ? 'anthropic' : input?.apiFormat === 'openai' ? 'openai' : '';
+    if (!baseUrl || !platform || !modelName || !apiFormat || !validTiers.has(input?.tier)) return badRequest('platform, protocol, endpoint, model name, and tier are required');
     const accountId = typeof input.id === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(input.id) ? input.id : id();
     const previous = oldAccounts.find(account => account.id === accountId);
     const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
@@ -154,7 +156,7 @@ async function adminAiConfig(request, env) {
       try { encryptedKey = await encryptConfigValue(apiKey, env.ADMIN_CONFIG_KEY); } catch { return json({ error: 'config_secret_unavailable' }, { status: 409 }); }
     }
     if (!encryptedKey) return badRequest('API Key is required for every channel');
-    stored.accounts.push({ id: accountId, platform, modelName, tier: input.tier, baseUrl, encryptedKey });
+    stored.accounts.push({ id: accountId, platform, apiFormat, modelName, tier: input.tier, baseUrl, encryptedKey });
   }
   await env.DB.batch([
     env.DB.prepare('INSERT INTO app_settings (setting_key, value_json, updated_by) VALUES (?, ?, ?) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP').bind(aiConfigKey, JSON.stringify(stored), identity.user.id),
