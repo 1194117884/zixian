@@ -471,8 +471,12 @@ document.querySelector('#conversation').addEventListener('click', async event =>
   try {
     if (button.dataset.outputAction === 'share') {
       const page = await api(`/api/documents/${documentId}/publish`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ versionId }) });
-      document.querySelector('.share-url code').textContent = page.url;
-      document.querySelector('#share-dialog').showModal();
+      try {
+        await navigator.clipboard.writeText(page.url);
+        showToast('永久分享链接已复制');
+      } catch {
+        showToast('永久链接已生成，但浏览器未允许复制');
+      }
     }
     if (button.dataset.outputAction === 'export') {
       try {
@@ -570,7 +574,6 @@ document.querySelector('#publications-results').addEventListener('click', async 
     } catch { showToast('套用风格失败，请稍后重试'); }
   }
 });
-document.querySelector('#close-dialog').addEventListener('click', () => document.querySelector('#share-dialog').close());
 document.querySelector('#close-publish-style').addEventListener('click', () => document.querySelector('#publish-style-dialog').close());
 document.querySelector('#close-cloud-render').addEventListener('click', () => cloudRenderDialog.close());
 document.querySelector('#cancel-cloud-render').addEventListener('click', () => cloudRenderDialog.close());
@@ -609,10 +612,6 @@ document.querySelector('#publish-style-form').addEventListener('submit', async e
     button.disabled = false;
     button.textContent = '确认发布';
   }
-});
-document.querySelector('#copy-link').addEventListener('click', async () => {
-  await navigator.clipboard?.writeText(document.querySelector('.share-url code').textContent);
-  showToast('分享链接已复制');
 });
 document.querySelector('#new-work').addEventListener('click', () => {
   content.value = ''; instruction.value = ''; count.textContent = '0'; resetCreation(); renderDocument(); content.focus(); showToast('已新建空白作品');
