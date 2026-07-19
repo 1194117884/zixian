@@ -26,6 +26,12 @@ function escapeHtml(value) {
   return value.replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
 }
 
+function localExportError(stage, cause) {
+  const error = new Error(`local_export_${stage}`);
+  error.cause = cause;
+  return error;
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, { credentials: 'same-origin', ...options });
   const body = await response.json().catch(() => ({}));
@@ -78,10 +84,10 @@ function addPreviewToMessage(message, documentVersion) {
 async function renderPreviewPng(actions) {
   const iframe = actions.previousElementSibling?.querySelector('iframe');
   const source = iframe?.contentDocument;
-  if (!source?.body) throw new Error('client_export_unavailable');
+  if (!source?.body) throw localExportError('preview_unavailable');
   const width = Math.max(source.documentElement.clientWidth, source.body.scrollWidth);
   const height = Math.max(source.documentElement.scrollHeight, source.body.scrollHeight);
-  if (width < 1 || height < 1) throw new Error('client_export_unavailable');
+  if (width < 1 || height < 1) throw localExportError('invalid_dimensions');
   const outputWidth = 1080;
   const outputHeight = Math.ceil(height * outputWidth / width);
   const styles = [...source.head.querySelectorAll('style')].map(style => style.textContent).join('\n')
@@ -92,13 +98,15 @@ async function renderPreviewPng(actions) {
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
   const image = new Image();
   try {
-    await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; image.src = url; });
+    await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = () => reject(localExportError('svg_load')); image.src = url; });
     const canvas = document.createElement('canvas');
     canvas.width = outputWidth;
     canvas.height = outputHeight;
-    canvas.getContext('2d').drawImage(image, 0, 0, outputWidth, outputHeight);
+    const context = canvas.getContext('2d');
+    if (!context) throw localExportError('canvas_unavailable');
+    try { context.drawImage(image, 0, 0, outputWidth, outputHeight); } catch (error) { throw localExportError('canvas_draw', error); }
     const png = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-    if (!png) throw new Error('client_export_unavailable');
+    if (!png) throw localExportError('png_encode');
     return png;
   } finally {
     URL.revokeObjectURL(url);
@@ -435,7 +443,8 @@ document.querySelector('#conversation').addEventListener('click', async event =>
       try {
         await downloadPreviewPng(actions);
         showToast('高清图已开始下载');
-      } catch {
+      } catch (error) {
+        console.warn('[ZiXian] Local export failed', error);
         cloudRenderDialog.dataset.documentId = documentId;
         cloudRenderDialog.dataset.versionId = versionId;
         cloudRenderDialog.showModal();
