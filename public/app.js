@@ -90,12 +90,23 @@ async function renderPreviewPng(actions) {
   if (width < 1 || height < 1) throw localExportError('invalid_dimensions');
   if (typeof window.html2canvas !== 'function') throw localExportError('renderer_unavailable');
   const outputWidth = 1080;
+  const renderFrame = document.createElement('iframe');
+  renderFrame.sandbox = 'allow-same-origin';
+  renderFrame.style.cssText = `position:fixed;left:-100000px;top:0;width:${width}px;height:${height}px;border:0;opacity:0;pointer-events:none;`;
   try {
-    const canvas = await window.html2canvas(source.body, { backgroundColor: null, height, logging: false, scale: outputWidth / width, useCORS: false, width, windowHeight: height, windowWidth: width });
+    const loaded = new Promise((resolve, reject) => { renderFrame.onload = resolve; renderFrame.onerror = () => reject(localExportError('render_frame_load')); });
+    renderFrame.srcdoc = source.documentElement.outerHTML;
+    document.body.append(renderFrame);
+    await loaded;
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    const renderSource = renderFrame.contentDocument;
+    if (!renderSource?.body) throw localExportError('render_frame_unavailable');
+    const renderHeight = Math.max(height, renderSource.documentElement.scrollHeight, renderSource.body.scrollHeight);
+    const canvas = await window.html2canvas(renderSource.body, { backgroundColor: null, height: renderHeight, logging: false, scale: outputWidth / width, useCORS: false, width, windowHeight: renderHeight, windowWidth: width });
     const png = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
     if (!png) throw localExportError('png_encode');
     return png;
-  } catch (error) { throw error.message?.startsWith('local_export_') ? error : localExportError('render', error); }
+  } catch (error) { throw error.message?.startsWith('local_export_') ? error : localExportError('render', error); } finally { renderFrame.remove(); }
 }
 
 async function downloadPreviewPng(actions) {
