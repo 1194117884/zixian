@@ -76,35 +76,37 @@ export function parseComposition(value) {
   };
 }
 
-function providerConfig(model, env) {
+function providerConfig(model, env, providerOverrides = {}) {
   if (model.provider === 'openai-compatible') {
     const deepseek = model.defaultModel.startsWith('deepseek-');
+    const override = providerOverrides[deepseek ? 'deepseek' : 'openai'] || {};
     return {
-      key: deepseek ? env.DEEPSEEK_API_KEY : env.OPENAI_API_KEY,
-      url: deepseek ? (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1/chat/completions') : (env.OPENAI_BASE_URL || 'https://api.openai.com/v1/chat/completions')
+      key: override.apiKey || (deepseek ? env.DEEPSEEK_API_KEY : env.OPENAI_API_KEY),
+      url: override.baseUrl || (deepseek ? (env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1/chat/completions') : (env.OPENAI_BASE_URL || 'https://api.openai.com/v1/chat/completions'))
     };
   }
   if (model.provider === 'anthropic-compatible') {
-    return { key: env.ANTHROPIC_API_KEY, url: env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com/v1/messages' };
+    const override = providerOverrides.anthropic || {};
+    return { key: override.apiKey || env.ANTHROPIC_API_KEY, url: override.baseUrl || env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com/v1/messages' };
   }
   throw new Error('unsupported_provider');
 }
 
-export async function generateComposition({ modelId, title, content, instruction, referenceDesign, history, revision = false, env, fetcher = fetch }) {
+export async function generateComposition({ modelId, title, content, instruction, referenceDesign, history, revision = false, env, systemPromptOverride = systemPrompt, providerOverrides, fetcher = fetch }) {
   const model = getModel(modelId);
   if (!model) throw new Error('unsupported_model');
-  const config = providerConfig(model, env);
+  const config = providerConfig(model, env, providerOverrides);
   if (!config.key) throw new Error('model_unavailable');
   const prompt = createCompositionPrompt({ title, content, instruction, referenceDesign, revision });
   const messages = [...conversationMessages(history), { role: 'user', content: prompt }];
   const request = model.provider === 'anthropic-compatible'
     ? {
         headers: { 'content-type': 'application/json', 'x-api-key': config.key, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: model.defaultModel, max_tokens: 1400, system: systemPrompt, messages })
+        body: JSON.stringify({ model: model.defaultModel, max_tokens: 1400, system: systemPromptOverride, messages })
       }
     : {
         headers: { 'content-type': 'application/json', authorization: `Bearer ${config.key}` },
-        body: JSON.stringify({ model: model.defaultModel, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: systemPrompt }, ...messages] })
+        body: JSON.stringify({ model: model.defaultModel, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: systemPromptOverride }, ...messages] })
       };
   const response = await fetcher(config.url, { method: 'POST', ...request });
   if (!response.ok) throw new Error('model_unavailable');

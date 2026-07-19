@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import worker from '../src/worker.js';
 import { createSafeDocument } from '../src/safe-document.js';
-import { createCompositionPrompt, generateComposition, getModel, parseComposition, systemPrompt } from '../src/models.js';
+import { createCompositionPrompt, generateComposition, getModel, parseComposition } from '../src/models.js';
 import { exportObjectKey, renderHtmlToPng, stylePreviewObjectKey } from '../src/export.js';
 import { hashSecret, normalizeEmail, validEmail } from '../src/auth.js';
 import { grantTestCredits } from '../src/payments.js';
@@ -83,16 +83,17 @@ test('model composition only accepts a bounded structured response', () => {
 test('model adapter requests constrained JSON and never accepts HTML output directly', async () => {
   let request;
   const composition = await generateComposition({
-    modelId: 'fast', title: '标题', content: '内容', instruction: '改成炫彩赛博朋克', history: [{ role: 'user', content: '先做第一版' }], revision: true, env: { DEEPSEEK_API_KEY: 'key' },
+    modelId: 'fast', title: '标题', content: '内容', instruction: '改成炫彩赛博朋克', history: [{ role: 'user', content: '先做第一版' }], revision: true, env: { DEEPSEEK_API_KEY: 'key' }, systemPromptOverride: '后台提示词', providerOverrides: { deepseek: { apiKey: 'admin-key', baseUrl: 'https://gateway.example/v1/chat/completions' } },
     fetcher: async (url, options) => {
       request = { url, options };
       return new Response(JSON.stringify({ choices: [{ message: { content: '{"title":"标题","paragraphs":["正文"],"highlight":"重点","design":{"background":"#113355","foreground":"#ffffff","accent":"#ffcc00","label":"MY DESIGN"}}' } }] }), { status: 200 });
     }
   });
 
-  assert.match(request.url, /deepseek/);
+  assert.equal(request.url, 'https://gateway.example/v1/chat/completions');
+  assert.equal(request.options.headers.authorization, 'Bearer admin-key');
   assert.deepEqual(JSON.parse(request.options.body).response_format, { type: 'json_object' });
-  assert.equal(JSON.parse(request.options.body).messages[0].content, systemPrompt);
+  assert.equal(JSON.parse(request.options.body).messages[0].content, '后台提示词');
   assert.equal(JSON.parse(request.options.body).messages[1].content, '先做第一版');
   assert.deepEqual(composition, { title: '标题', paragraphs: ['正文'], highlight: '重点', design: { background: '#113355', foreground: '#ffffff', accent: '#ffcc00', label: 'MY DESIGN' } });
 });

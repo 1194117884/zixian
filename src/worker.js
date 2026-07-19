@@ -1,5 +1,5 @@
 import { createSafeDocument, normalizeDesign } from './safe-document.js';
-import { generateComposition, modelCatalog } from './models.js';
+import { generateComposition, modelCatalog, systemPrompt } from './models.js';
 import { refundCloudRenderCredits, refundGenerationCredits, reserveCloudRenderCredits, reserveGenerationCredits } from './credits.js';
 import { grantTestCredits } from './payments.js';
 import { exportObjectKey, renderHtmlToPng, stylePreviewObjectKey } from './export.js';
@@ -61,6 +61,84 @@ async function adminOverview(request, env) {
     today: { users: usersToday.results[0].count, documents: documentsToday.results[0].count },
     recentGenerations: (recent.results || []).map(item => ({ ...item, modelLabel: modelCatalog[item.modelId]?.label || item.modelId }))
   });
+}
+
+const aiConfigKey = 'ai_config';
+const providerDefaults = {
+  deepseek: 'https://api.deepseek.com/v1/chat/completions',
+  openai: 'https://api.openai.com/v1/chat/completions',
+  anthropic: 'https://api.anthropic.com/v1/messages'
+};
+const encodeBase64 = value => btoa(String.fromCharCode(...new Uint8Array(value)));
+const decodeBase64 = value => Uint8Array.from(atob(value), character => character.charCodeAt(0));
+
+async function configCryptoKey(secret) {
+  if (!secret) return null;
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret));
+  return crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+async function encryptConfigValue(value, secret) {
+  const key = await configCryptoKey(secret);
+  if (!key) throw new Error('config_secret_unavailable');
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(value));
+  return `${encodeBase64(iv)}.${encodeBase64(encrypted)}`;
+}
+
+async function decryptConfigValue(value, secret) {
+  if (!value || !secret) return '';
+  try {
+    const [encodedIv, encodedValue] = value.split('.');
+    const key = await configCryptoKey(secret);
+    const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: decodeBase64(encodedIv) }, key, decodeBase64(encodedValue));
+    return new TextDecoder().decode(decrypted);
+  } catch { return ''; }
+}
+
+function validProviderUrl(value) {
+  try { const url = new URL(value); return url.protocol === 'https:' && value.length <= 300 ? value : ''; } catch { return ''; }
+}
+
+async function readAiConfig(env, includeSecrets = false) {
+  const row = await env.DB.prepare('SELECT value_json AS valueJson FROM app_settings WHERE setting_key = ?').bind(aiConfigKey).first();
+  const stored = (() => { try { return JSON.parse(row?.valueJson || '{}'); } catch { return {}; } })();
+  const providers = {};
+  for (const [name, fallbackUrl] of Object.entries(providerDefaults)) {
+    const entry = stored.providers?.[name] || {};
+    const baseUrl = validProviderUrl(entry.baseUrl) || fallbackUrl;
+    const envKey = name === 'deepseek' ? env.DEEPSEEK_API_KEY : name === 'openai' ? env.OPENAI_API_KEY : env.ANTHROPIC_API_KEY;
+    providers[name] = { baseUrl, keyConfigured: Boolean(entry.encryptedKey || envKey) };
+    if (includeSecrets) providers[name].apiKey = await decryptConfigValue(entry.encryptedKey, env.ADMIN_CONFIG_KEY) || envKey || '';
+  }
+  return { systemPrompt: typeof stored.systemPrompt === 'string' && stored.systemPrompt.trim() ? stored.systemPrompt : systemPrompt, providers };
+}
+
+async function adminAiConfig(request, env) {
+  const identity = await adminUser(request, env);
+  if (identity.error) return json({ error: identity.error }, { status: identity.error === 'unauthorized' ? 401 : 403 });
+  if (request.method === 'GET') return json(await readAiConfig(env));
+  const payload = await request.json().catch(() => null);
+  if (!payload || typeof payload.systemPrompt !== 'string' || !payload.systemPrompt.trim() || payload.systemPrompt.length > 12000) return badRequest('valid system prompt is required');
+  const current = await readAiConfig(env);
+  const existing = await env.DB.prepare('SELECT value_json AS valueJson FROM app_settings WHERE setting_key = ?').bind(aiConfigKey).first();
+  const existingConfig = (() => { try { return JSON.parse(existing?.valueJson || '{}'); } catch { return {}; } })();
+  const stored = { systemPrompt: payload.systemPrompt.trim(), providers: {} };
+  for (const [name, fallbackUrl] of Object.entries(providerDefaults)) {
+    const input = payload.providers?.[name] || {};
+    const baseUrl = validProviderUrl(input.baseUrl) || current.providers[name].baseUrl || fallbackUrl;
+    const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
+    let encryptedKey = existingConfig.providers?.[name]?.encryptedKey || '';
+    if (apiKey) {
+      try { encryptedKey = await encryptConfigValue(apiKey, env.ADMIN_CONFIG_KEY); } catch { return json({ error: 'config_secret_unavailable' }, { status: 409 }); }
+    }
+    stored.providers[name] = { baseUrl, encryptedKey };
+  }
+  await env.DB.batch([
+    env.DB.prepare('INSERT INTO app_settings (setting_key, value_json, updated_by) VALUES (?, ?, ?) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP').bind(aiConfigKey, JSON.stringify(stored), identity.user.id),
+    env.DB.prepare('INSERT INTO admin_audit_logs (id, admin_user_id, action, target_type, target_id, detail_json) VALUES (?, ?, ?, ?, ?, ?)').bind(id(), identity.user.id, 'update', 'ai_config', aiConfigKey, JSON.stringify({ providers: Object.keys(stored.providers) }))
+  ]);
+  return json(await readAiConfig(env));
 }
 
 function validDocumentPayload(payload) {
@@ -393,6 +471,7 @@ async function createGenerationJob(request, env) {
 
     await env.DB.prepare("UPDATE generation_jobs SET status = 'running' WHERE id = ? AND owner_id = ?").bind(reservation.job.id, ownerId).run();
     try {
+      const aiConfig = await readAiConfig(env, true);
       const composition = await generateComposition({
         modelId: payload.modelId,
         title: payload.title,
@@ -401,6 +480,8 @@ async function createGenerationJob(request, env) {
         referenceDesign: reference ? normalizeDesign(JSON.parse(reference.content_json).design) : undefined,
         history: payload.history,
         revision: Boolean(existingDocument),
+        systemPromptOverride: aiConfig.systemPrompt,
+        providerOverrides: aiConfig.providers,
         env
       });
       const generatedContent = [...composition.paragraphs, composition.highlight].join('\n\n');
@@ -500,6 +581,7 @@ export default {
 
     if (request.method === 'GET' && url.pathname === '/api/admin/me') return adminMe(request, env);
     if (request.method === 'GET' && url.pathname === '/api/admin/overview') return adminOverview(request, env);
+    if ((request.method === 'GET' || request.method === 'PUT') && url.pathname === '/api/admin/ai-config') return adminAiConfig(request, env);
 
     if (request.method === 'GET' && url.pathname === '/api/wallet') return wallet(request, env);
     if (request.method === 'POST' && url.pathname === '/api/test-payments') return testPayment(request, env);
