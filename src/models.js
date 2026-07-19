@@ -119,10 +119,6 @@ function tokenUsage(body, anthropic) {
     : { inputTokens: Number(usage.prompt_tokens) || 0, outputTokens: Number(usage.completion_tokens) || 0 };
 }
 
-function anthropicMessagesUrl(baseUrl) {
-  return /\/v1\/messages\/?$/.test(baseUrl) ? baseUrl : `${baseUrl.replace(/\/$/, '')}/v1/messages`;
-}
-
 export async function generateComposition({ modelId, title, content, instruction, referenceDesign, history, revision = false, env, systemPromptOverride = systemPrompt, providerOverrides, requestKey, fetcher = fetch }) {
   const model = getModel(modelId);
   if (!model) throw new Error('unsupported_model');
@@ -145,7 +141,7 @@ export async function generateComposition({ modelId, title, content, instruction
           body: JSON.stringify({ model: account.modelName || model.defaultModel, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: systemPromptOverride }, ...messages] })
         };
     try {
-      const response = await fetcher(anthropic ? anthropicMessagesUrl(account.baseUrl) : account.baseUrl, { method: 'POST', ...request });
+      const response = await fetcher(account.baseUrl, { method: 'POST', ...request });
       attempt.httpStatus = response.status;
       if (!response.ok) {
         attempt.errorCode = `http_${response.status}`;

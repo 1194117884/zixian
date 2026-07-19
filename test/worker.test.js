@@ -142,20 +142,6 @@ test('model adapter excludes paused channels from routing', async () => {
   assert.equal(url, 'https://active.example/chat');
 });
 
-test('Anthropic-compatible channels accept a documented base URL', async () => {
-  let request;
-  await generateComposition({
-    modelId: 'fast', title: '标题', content: '内容', instruction: '', env: {},
-    providerOverrides: { accounts: [{ apiFormat: 'anthropic', tier: 'fast', modelName: 'deepseek-v4-flash', apiKey: 'key', baseUrl: 'https://ark.cn-beijing.volces.com/api/plan' }] },
-    fetcher: async (url, options) => {
-      request = { url, options };
-      return new Response(JSON.stringify({ content: [{ text: '{"title":"标题","html":"<p>正文</p>"}' }] }), { status: 200 });
-    }
-  });
-  assert.equal(request.url, 'https://ark.cn-beijing.volces.com/api/plan/v1/messages');
-  assert.equal(request.options.headers['x-api-key'], 'key');
-});
-
 test('model adapter exposes invalid structured output separately from an unavailable model', async () => {
   await assert.rejects(
     generateComposition({ modelId: 'fast', title: '标题', content: '内容', instruction: '', env: {}, providerOverrides: { accounts: [{ tier: 'fast', apiKey: 'key', baseUrl: 'https://example.test/chat' }] }, fetcher: async () => new Response(JSON.stringify({ choices: [{ message: { content: '{"title":"标题"}' } }] }), { status: 200 }) }),
