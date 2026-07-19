@@ -84,6 +84,16 @@ async function recordGenerationTelemetry(env, jobId, telemetry) {
   ]);
 }
 
+async function acquireGenerationLock(env, ownerId, jobId) {
+  await env.DB.prepare("DELETE FROM generation_locks WHERE created_at < datetime('now', '-2 minutes')").run();
+  const result = await env.DB.prepare('INSERT OR IGNORE INTO generation_locks (owner_id, generation_job_id) VALUES (?, ?)').bind(ownerId, jobId).run();
+  return result.meta.changes === 1;
+}
+
+async function releaseGenerationLock(env, ownerId, jobId) {
+  await env.DB.prepare('DELETE FROM generation_locks WHERE owner_id = ? AND generation_job_id = ?').bind(ownerId, jobId).run();
+}
+
 const aiConfigKey = 'ai_config';
 const legacyProviders = {
   deepseek: { platform: 'DeepSeek', apiFormat: 'openai', tier: 'fast', modelName: 'deepseek-v4-flash', baseUrl: 'https://api.deepseek.com/v1/chat/completions', envKey: 'DEEPSEEK_API_KEY' },
@@ -526,6 +536,9 @@ async function createGenerationJob(request, env) {
     ? await env.DB.prepare("SELECT v.content_json FROM style_templates t JOIN document_versions v ON v.id = t.source_version_id WHERE t.id = ? AND t.moderation_status = 'approved'").bind(payload.styleTemplateId).first()
     : null;
 
+  const recentRequests = await env.DB.prepare("SELECT COUNT(*) AS count FROM generation_jobs WHERE owner_id = ? AND created_at >= datetime('now', '-1 minute')").bind(ownerId).first();
+  if ((recentRequests?.count || 0) >= 4) return json({ error: 'generation_rate_limited', retryAfter: 60 }, { status: 429 });
+
   try {
     const reservation = await reserveGenerationCredits({
       db: env.DB,
@@ -538,30 +551,38 @@ async function createGenerationJob(request, env) {
     if (reservation.state === 'insufficient_credits') return json({ error: 'insufficient_credits' }, { status: 402 });
     if (reservation.state === 'existing') return json(reservation, { status: 200 });
 
-    await env.DB.prepare("UPDATE generation_jobs SET status = 'running' WHERE id = ? AND owner_id = ?").bind(reservation.job.id, ownerId).run();
     try {
-      const aiConfig = await readAiConfig(env, true);
-      const generated = await generateComposition({
-        modelId: payload.modelId,
-        title: payload.title,
-        content: payload.content,
-        instruction: payload.instruction,
-        referenceDesign: reference ? normalizeDesign(JSON.parse(reference.content_json).design) : undefined,
-        history: payload.history,
-        revision: Boolean(existingDocument),
-        systemPromptOverride: aiConfig.systemPrompt,
-        providerOverrides: aiConfig,
-        requestKey: reservation.job.id,
-        env
-      });
-      const { composition } = generated;
-      const generatedContent = [...composition.paragraphs, composition.highlight].join('\n\n');
-      const document = existingDocument
-        ? await createDocumentVersionForOwner({ ownerId, document: existingDocument, parentVersionId, payload: { title: composition.title, content: generatedContent, design: composition.design }, env })
-        : await createDocumentForOwner({ ownerId, payload: { title: composition.title, content: generatedContent, design: composition.design }, env });
-      await env.DB.prepare("UPDATE generation_jobs SET document_id = ?, status = 'succeeded', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?").bind(document.id, reservation.job.id, ownerId).run();
-      await recordGenerationTelemetry(env, reservation.job.id, generated.telemetry).catch(error => console.error('generation telemetry write failed', error));
-      return json({ job: { ...reservation.job, status: 'succeeded' }, document, composition }, { status: 201 });
+      if (!(await acquireGenerationLock(env, ownerId, reservation.job.id))) {
+        await refundGenerationCredits({ db: env.DB, ownerId, jobId: reservation.job.id, credits: reservation.job.costCredits });
+        return json({ error: 'generation_in_progress' }, { status: 409 });
+      }
+      try {
+        await env.DB.prepare("UPDATE generation_jobs SET status = 'running' WHERE id = ? AND owner_id = ?").bind(reservation.job.id, ownerId).run();
+        const aiConfig = await readAiConfig(env, true);
+        const generated = await generateComposition({
+          modelId: payload.modelId,
+          title: payload.title,
+          content: payload.content,
+          instruction: payload.instruction,
+          referenceDesign: reference ? normalizeDesign(JSON.parse(reference.content_json).design) : undefined,
+          history: payload.history,
+          revision: Boolean(existingDocument),
+          systemPromptOverride: aiConfig.systemPrompt,
+          providerOverrides: aiConfig,
+          requestKey: reservation.job.id,
+          env
+        });
+        const { composition } = generated;
+        const generatedContent = [...composition.paragraphs, composition.highlight].join('\n\n');
+        const document = existingDocument
+          ? await createDocumentVersionForOwner({ ownerId, document: existingDocument, parentVersionId, payload: { title: composition.title, content: generatedContent, design: composition.design }, env })
+          : await createDocumentForOwner({ ownerId, payload: { title: composition.title, content: generatedContent, design: composition.design }, env });
+        await env.DB.prepare("UPDATE generation_jobs SET document_id = ?, status = 'succeeded', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?").bind(document.id, reservation.job.id, ownerId).run();
+        await recordGenerationTelemetry(env, reservation.job.id, generated.telemetry).catch(error => console.error('generation telemetry write failed', error));
+        return json({ job: { ...reservation.job, status: 'succeeded' }, document, composition }, { status: 201 });
+      } finally {
+        await releaseGenerationLock(env, ownerId, reservation.job.id).catch(error => console.error('generation lock release failed', error));
+      }
     } catch (error) {
       await refundGenerationCredits({ db: env.DB, ownerId, jobId: reservation.job.id, credits: reservation.job.costCredits });
       return json({ error: error.message === 'invalid_model_output' ? 'model_output_invalid' : 'model_unavailable' }, { status: 503 });
