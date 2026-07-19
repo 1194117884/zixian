@@ -154,7 +154,14 @@ async function readAiConfig(env, includeSecrets = false) {
   for (const account of configuredAccounts.slice(0, 36)) {
     const baseUrl = validProviderUrl(account?.baseUrl);
     const apiKey = await decryptConfigValue(account?.encryptedKey, env.ADMIN_CONFIG_KEY);
-    if (!baseUrl || !apiKey || !validTiers.has(account?.tier)) continue;
+    if (!baseUrl || !apiKey || !validTiers.has(account?.tier)) {
+      console.warn('[ZiXian] AI channel skipped', {
+        platform: account?.platform || '',
+        modelName: account?.modelName || '',
+        reason: !baseUrl ? 'invalid_base_url' : !apiKey ? 'key_unavailable' : 'invalid_tier'
+      });
+      continue;
+    }
     const apiFormat = account?.apiFormat === 'anthropic' || (!account?.apiFormat && account?.platform?.toLowerCase().includes('anthropic')) ? 'anthropic' : 'openai';
     accounts.push({ id: typeof account.id === 'string' ? account.id : id(), platform: typeof account.platform === 'string' ? account.platform.slice(0, 40) : '', apiFormat, modelName: typeof account.modelName === 'string' ? account.modelName.slice(0, 100) : '', tier: account.tier, baseUrl, enabled: account.enabled !== false, ...(includeSecrets ? { apiKey } : {}) });
   }
@@ -597,6 +604,11 @@ async function createGenerationJob(request, env) {
         await releaseGenerationLock(env, ownerId, reservation.job.id).catch(error => console.error('generation lock release failed', error));
       }
     } catch (error) {
+      console.error('[ZiXian] generation failed', {
+        jobId: reservation.job.id,
+        modelId: payload.modelId,
+        reason: error instanceof Error ? error.message : 'unknown_error'
+      });
       await refundGenerationCredits({ db: env.DB, ownerId, jobId: reservation.job.id, credits: reservation.job.costCredits });
       return json({ error: error.message === 'invalid_model_output' ? 'model_output_invalid' : 'model_unavailable' }, { status: 503 });
     }

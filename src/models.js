@@ -145,6 +145,11 @@ export async function generateComposition({ modelId, title, content, instruction
       attempt.httpStatus = response.status;
       if (!response.ok) {
         attempt.errorCode = `http_${response.status}`;
+        console.warn('[ZiXian] AI channel returned an error', {
+          platform: attempt.platform,
+          modelName: attempt.modelName,
+          httpStatus: response.status
+        });
         attempts.push(attempt);
         if (shouldFailover(response.status)) continue;
         throw new Error('model_unavailable');
@@ -159,6 +164,12 @@ export async function generateComposition({ modelId, title, content, instruction
       if (error.message === 'model_unavailable') throw error;
       if (error.message === 'invalid_model_output') invalidOutput = true;
       attempt.errorCode = error.message === 'invalid_model_output' ? 'invalid_model_output' : 'network_error';
+      console.warn('[ZiXian] AI channel attempt failed', {
+        platform: attempt.platform,
+        modelName: attempt.modelName,
+        httpStatus: attempt.httpStatus,
+        reason: attempt.errorCode
+      });
       attempts.push(attempt);
     }
   }
