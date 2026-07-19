@@ -424,6 +424,13 @@ document.querySelector('#model-options').addEventListener('click', event => {
   if (!option) return;
   selectedModelId = option.dataset.modelId;
   renderModelOptions(availableModels);
+  document.querySelector('#model-picker').classList.remove('mobile-open');
+  document.querySelector('#current-model').setAttribute('aria-expanded', 'false');
+});
+document.querySelector('#current-model').addEventListener('click', () => {
+  const picker = document.querySelector('#model-picker');
+  const open = picker.classList.toggle('mobile-open');
+  document.querySelector('#current-model').setAttribute('aria-expanded', String(open));
 });
 document.querySelector('#clear-instruction').addEventListener('click', () => { instruction.value = ''; instruction.focus(); });
 document.querySelector('#style-rail').addEventListener('click', async event => {
@@ -622,6 +629,10 @@ document.addEventListener('click', event => {
   if (!menu.hidden && !event.target.closest('#account-menu, #login')) {
     menu.hidden = true;
     document.querySelector('#login').setAttribute('aria-expanded', 'false');
+  }
+  if (!event.target.closest('#model-picker')) {
+    document.querySelector('#model-picker').classList.remove('mobile-open');
+    document.querySelector('#current-model').setAttribute('aria-expanded', 'false');
   }
 });
 document.querySelector('#buy-credits').addEventListener('click', async () => {
