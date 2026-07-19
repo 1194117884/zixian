@@ -127,20 +127,33 @@ async function renderPreviewPng(actions) {
   } catch (error) { throw error.message?.startsWith('local_export_') ? error : localExportError('render', error); } finally { renderFrame.remove(); }
 }
 
-async function downloadPreviewPng(actions) {
-  const png = await renderPreviewPng(actions);
+async function savePng(png, filename = 'zixian.png') {
+  let copied = false;
+  if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+      copied = true;
+    } catch {}
+  }
   const download = document.createElement('a');
   download.href = URL.createObjectURL(png);
-  download.download = 'zixian.png';
+  download.download = filename;
   download.click();
   setTimeout(() => URL.revokeObjectURL(download.href), 1000);
+  return copied;
+}
+
+async function downloadPreviewPng(actions) {
+  return savePng(await renderPreviewPng(actions));
 }
 
 async function requestCloudRender(documentId, versionId) {
   showToast('正在云端生成高清图…');
   const output = await api(`/api/documents/${documentId}/exports`, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() }, body: JSON.stringify({ versionId }) });
   await loadWallet();
-  window.location.assign(output.downloadUrl);
+  const response = await fetch(output.downloadUrl, { credentials: 'same-origin' });
+  if (!response.ok) throw new Error('export_download_failed');
+  return savePng(await response.blob(), `zixian-${output.id}.png`);
 }
 
 function showGeneratedDocument() {
@@ -463,8 +476,8 @@ document.querySelector('#conversation').addEventListener('click', async event =>
     }
     if (button.dataset.outputAction === 'export') {
       try {
-        await downloadPreviewPng(actions);
-        showToast('高清图已开始下载');
+        const copied = await downloadPreviewPng(actions);
+        showToast(copied ? '高清图已下载并复制到剪贴板' : '高清图已下载；浏览器未允许复制图片');
       } catch (error) {
         console.warn('[ZiXian] Local export failed', error);
         cloudRenderDialog.dataset.documentId = documentId;
@@ -565,8 +578,9 @@ document.querySelector('#confirm-cloud-render').addEventListener('click', async 
   const button = event.currentTarget;
   button.disabled = true;
   try {
-    await requestCloudRender(cloudRenderDialog.dataset.documentId, cloudRenderDialog.dataset.versionId);
+    const copied = await requestCloudRender(cloudRenderDialog.dataset.documentId, cloudRenderDialog.dataset.versionId);
     cloudRenderDialog.close();
+    showToast(copied ? '高清图已下载并复制到剪贴板' : '高清图已下载；浏览器未允许复制图片');
   } catch (error) {
     showToast(error.code === 'insufficient_credits' ? '积分不足，请先充值' : '截图服务暂不可用，已自动退回积分');
   } finally {
