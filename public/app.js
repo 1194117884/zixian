@@ -88,29 +88,14 @@ async function renderPreviewPng(actions) {
   const width = Math.max(source.documentElement.clientWidth, source.body.scrollWidth);
   const height = Math.max(source.documentElement.scrollHeight, source.body.scrollHeight);
   if (width < 1 || height < 1) throw localExportError('invalid_dimensions');
+  if (typeof window.html2canvas !== 'function') throw localExportError('renderer_unavailable');
   const outputWidth = 1080;
-  const outputHeight = Math.ceil(height * outputWidth / width);
-  const styles = [...source.head.querySelectorAll('style')].map(style => style.textContent).join('\n')
-    .replace(/html\s*,\s*body\s*\{/g, '.zixian-export{')
-    .replace(/\bbody(?=\s*\{)/g, '.zixian-export');
-  const markup = `<div xmlns="http://www.w3.org/1999/xhtml" class="zixian-export"><style>${styles}</style>${source.body.innerHTML}</div>`;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${outputWidth}" height="${outputHeight}" viewBox="0 0 ${width} ${height}"><foreignObject width="${width}" height="${height}">${markup}</foreignObject></svg>`;
-  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
-  const image = new Image();
   try {
-    await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = () => reject(localExportError('svg_load')); image.src = url; });
-    const canvas = document.createElement('canvas');
-    canvas.width = outputWidth;
-    canvas.height = outputHeight;
-    const context = canvas.getContext('2d');
-    if (!context) throw localExportError('canvas_unavailable');
-    try { context.drawImage(image, 0, 0, outputWidth, outputHeight); } catch (error) { throw localExportError('canvas_draw', error); }
+    const canvas = await window.html2canvas(source.body, { backgroundColor: null, height, logging: false, scale: outputWidth / width, useCORS: false, width, windowHeight: height, windowWidth: width });
     const png = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
     if (!png) throw localExportError('png_encode');
     return png;
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  } catch (error) { throw error.message?.startsWith('local_export_') ? error : localExportError('render', error); }
 }
 
 async function downloadPreviewPng(actions) {

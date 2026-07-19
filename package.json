@@ -12,5 +12,8 @@
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
+  },
+  "dependencies": {
+    "html2canvas": "^1.4.1"
   }
 }
