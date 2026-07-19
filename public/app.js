@@ -21,6 +21,7 @@ let hasGenerated = false;
 let versionCount = 0;
 let conversationHistory = [];
 let styleRailStyles = [];
+const cloudPreviewViewport = { width: 1080, height: 1440 };
 
 function escapeHtml(value) {
   return value.replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
@@ -62,12 +63,23 @@ function addConversationMessage(role, text) {
   return message;
 }
 
+function fitPreviewBubble(bubble, iframe) {
+  const source = iframe.contentDocument;
+  if (!source?.body || bubble.clientWidth < 1) return;
+  const height = Math.max(cloudPreviewViewport.height, source.documentElement.scrollHeight, source.body.scrollHeight);
+  const scale = bubble.clientWidth / cloudPreviewViewport.width;
+  iframe.style.height = `${height}px`;
+  iframe.style.transform = `scale(${scale})`;
+  bubble.style.height = `${Math.ceil(height * scale)}px`;
+}
+
 function addPreviewToMessage(message, documentVersion) {
   const bubble = document.createElement('div');
   bubble.className = 'document-bubble';
   const iframe = document.createElement('iframe');
   iframe.title = `第 ${versionCount} 版作品预览`;
   iframe.sandbox = 'allow-same-origin';
+  iframe.style.cssText = `display:block;width:${cloudPreviewViewport.width}px;height:${cloudPreviewViewport.height}px;border:0;background:#fff;transform-origin:top left;`;
   iframe.src = `/api/documents/${encodeURIComponent(documentVersion.id)}/versions/${encodeURIComponent(documentVersion.versionId)}/preview`;
   bubble.append(iframe);
   message.append(bubble);
@@ -77,7 +89,12 @@ function addPreviewToMessage(message, documentVersion) {
   actions.dataset.documentId = documentVersion.id;
   actions.dataset.versionId = documentVersion.versionId;
   actions.innerHTML = '<button type="button" data-output-action="share">分享</button><button type="button" data-output-action="export" disabled>生成高清图</button><button type="button" data-output-action="style" disabled>发布为风格</button>';
-  iframe.addEventListener('load', () => actions.querySelectorAll('[data-output-action="export"], [data-output-action="style"]').forEach(button => { button.disabled = false; }));
+  const observer = new ResizeObserver(() => fitPreviewBubble(bubble, iframe));
+  observer.observe(bubble);
+  iframe.addEventListener('load', () => {
+    fitPreviewBubble(bubble, iframe);
+    actions.querySelectorAll('[data-output-action="export"], [data-output-action="style"]').forEach(button => { button.disabled = false; });
+  });
   message.append(actions);
 }
 
