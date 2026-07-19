@@ -34,6 +34,16 @@ function styleTemplatePayload(payload) {
   return { title, description };
 }
 
+function clientPreviewPng(payload) {
+  const value = typeof payload?.previewDataUrl === 'string' ? payload.previewDataUrl : '';
+  if (!value) return null;
+  const encoded = value.match(/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/)?.[1];
+  if (!encoded) return null;
+  const binary = atob(encoded);
+  if (binary.length < 8 || binary.length > 8 * 1024 * 1024 || binary.slice(0, 8) !== '\x89PNG\r\n\x1a\n') return null;
+  return Uint8Array.from(binary, character => character.charCodeAt(0)).buffer;
+}
+
 async function createDocumentForOwner({ ownerId, payload, env }) {
   const documentId = id();
   const versionId = id();
@@ -171,6 +181,12 @@ async function publishStyleTemplate(request, env, documentId) {
   const templateId = id();
   const exportRecord = await env.DB.prepare('SELECT object_key FROM exports WHERE document_id = ? AND version_id = ? ORDER BY created_at DESC LIMIT 1').bind(document.id, version.id).first();
   let previewObjectKey = exportRecord?.object_key;
+  const clientPreview = clientPreviewPng(payload);
+  if (typeof payload?.previewDataUrl === 'string' && payload.previewDataUrl && !clientPreview) return badRequest('invalid preview image');
+  if (!previewObjectKey && clientPreview) {
+    previewObjectKey = stylePreviewObjectKey({ templateId });
+    await env.ASSETS.put(previewObjectKey, clientPreview, { httpMetadata: { contentType: 'image/png' } });
+  }
   if (!previewObjectKey) {
     const sourceObject = await env.ASSETS.get(version.html_object_key);
     if (!sourceObject) return json({ error: 'not_found' }, { status: 404 });

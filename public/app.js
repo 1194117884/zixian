@@ -73,7 +73,7 @@ function addPreviewToMessage(message, documentVersion) {
   message.append(actions);
 }
 
-async function downloadPreviewPng(actions) {
+async function renderPreviewPng(actions) {
   const iframe = actions.previousElementSibling?.querySelector('iframe');
   const source = iframe?.contentDocument;
   if (!source?.documentElement) throw new Error('client_export_unavailable');
@@ -93,14 +93,19 @@ async function downloadPreviewPng(actions) {
     canvas.getContext('2d').drawImage(image, 0, 0, outputWidth, outputHeight);
     const png = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
     if (!png) throw new Error('client_export_unavailable');
-    const download = document.createElement('a');
-    download.href = URL.createObjectURL(png);
-    download.download = 'zixian.png';
-    download.click();
-    setTimeout(() => URL.revokeObjectURL(download.href), 1000);
+    return png;
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+async function downloadPreviewPng(actions) {
+  const png = await renderPreviewPng(actions);
+  const download = document.createElement('a');
+  download.href = URL.createObjectURL(png);
+  download.download = 'zixian.png';
+  download.click();
+  setTimeout(() => URL.revokeObjectURL(download.href), 1000);
 }
 
 function showGeneratedDocument() {
@@ -515,14 +520,22 @@ document.querySelector('#publish-style-form').addEventListener('submit', async e
   const dialog = document.querySelector('#publish-style-dialog');
   const button = document.querySelector('#publish-style-submit');
   button.disabled = true;
+  button.textContent = '正在发布…';
   try {
-    await api(`/api/documents/${dialog.dataset.documentId}/styles`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ versionId: dialog.dataset.versionId, title: document.querySelector('#style-title').value }) });
+    const actions = [...document.querySelectorAll('.output-actions')].find(item => item.dataset.versionId === dialog.dataset.versionId);
+    let previewDataUrl;
+    try {
+      const previewPng = await renderPreviewPng(actions);
+      previewDataUrl = await new Promise(resolve => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => resolve(null); reader.readAsDataURL(previewPng); });
+    } catch {}
+    await api(`/api/documents/${dialog.dataset.documentId}/styles`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ versionId: dialog.dataset.versionId, title: document.querySelector('#style-title').value, previewDataUrl }) });
     dialog.close();
     showToast('已发布到风格库');
   } catch (error) {
     showToast(error.code === 'already_published' ? '这份作品已经发布为风格' : error.code === 'render_unavailable' ? '示例图暂不可生成，请稍后重试' : '风格发布失败，请稍后重试');
   } finally {
     button.disabled = false;
+    button.textContent = '确认发布';
   }
 });
 document.querySelector('#copy-link').addEventListener('click', async () => {
