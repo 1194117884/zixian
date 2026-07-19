@@ -180,11 +180,12 @@ function showToast(message) {
 function updateGenerateButton() {
   const model = availableModels.find(item => item.id === selectedModelId);
   document.querySelector('#generate').innerHTML = `生成作品 <span>✦ ${model?.credits ?? 6}</span>`;
+  document.querySelector('#current-model').textContent = model ? `当前：${model.label} · ${model.credits} 积分` : '当前模型暂不可用';
 }
 
 function renderModelOptions(models) {
   const container = document.querySelector('#model-options');
-  if (!models.length) { container.innerHTML = '<span class="model-loading">模型暂不可用，请刷新重试。</span>'; return; }
+  if (!models.length) { container.innerHTML = '<span class="model-loading">模型暂不可用，请刷新重试。</span>'; updateGenerateButton(); return; }
   availableModels = models;
   if (!models.some(model => model.id === selectedModelId)) selectedModelId = models[0].id;
   container.innerHTML = models.map(model => `<button class="model-option${model.id === selectedModelId ? ' selected' : ''}" type="button" data-model-id="${escapeHtml(model.id)}"><span class="model-option-top"><b>${escapeHtml(model.label)}</b><small>${escapeHtml(model.speed || '—')}</small></span><span class="model-name">${escapeHtml(model.modelName || model.label)}</span><span class="model-description">${escapeHtml(model.description || '按所选设计语言整理内容。')}</span><span class="model-credits">✦ ${model.credits} 积分</span></button>`).join('');
