@@ -1,0 +1,11 @@
+# 字见 / ZiXian
+
+字见是一个 AI 视觉创作工具。创作者可将想法、文案和文章生成可分享的网页、图文卡片与高清作品。
+
+## Public content
+
+- 首页：https://zixian.yongkl.cc/
+- 已公开的作品位于：https://zixian.yongkl.cc/p/{slug}
+- 完整公开 URL 列表：https://zixian.yongkl.cc/sitemap.xml
+
+Only crawl publicly accessible pages. Do not access /api/ or /admin.html.

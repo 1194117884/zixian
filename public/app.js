@@ -187,17 +187,36 @@ function resetCreation() {
   document.querySelector('#generate-hint').textContent = '⌘ Enter 生成';
 }
 
-function showToast(message) {
-  toast.textContent = message;
+function showToast(message, action) {
+  toast.replaceChildren(document.createTextNode(message));
+  toast.style.pointerEvents = action ? 'auto' : '';
+  if (action) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = action.label;
+    button.style.cssText = 'margin-left:10px;border:0;border-radius:4px;padding:4px 7px;background:#f2e45e;color:#242421;font:600 12px Arial;cursor:pointer';
+    button.addEventListener('click', action.onClick);
+    toast.append(button);
+  }
   toast.classList.add('show');
   clearTimeout(showToast.timer);
   showToast.timer = setTimeout(() => toast.classList.remove('show'), 2400);
 }
 
+function showGenerationError(error) {
+  if (error.code === 'insufficient_credits') return showToast('积分不足，请先充值');
+  if (error.code === 'generation_in_progress') return showToast('正在生成中，请等待当前任务完成');
+  if (error.code === 'generation_rate_limited') return showToast('生成过于频繁，请稍后再试');
+  const refunded = error.refund?.status === 'refunded' ? `已退回 ${error.refund.credits} 积分。` : '';
+  if (error.code === 'database_not_ready') return showToast(`创作服务正在更新，${refunded}`, { label: '重试', onClick: () => document.querySelector('#generate').click() });
+  const message = error.code === 'model_output_invalid' ? `模型返回格式异常，${refunded}` : `模型服务暂不可用，${refunded}`;
+  showToast(message, { label: '重试', onClick: () => document.querySelector('#generate').click() });
+}
+
 function updateGenerateButton() {
   const model = availableModels.find(item => item.id === selectedModelId);
   document.querySelector('#generate').innerHTML = `生成作品 <span>✦ ${model?.credits ?? 6}</span>`;
-  document.querySelector('#current-model').textContent = model ? `当前：${model.label} · ${model.credits} 积分` : '当前模型暂不可用';
+  document.querySelector('#current-model').textContent = model ? model.label : '模型暂不可用';
 }
 
 function renderModelOptions(models) {
@@ -205,7 +224,7 @@ function renderModelOptions(models) {
   if (!models.length) { container.innerHTML = '<span class="model-loading">模型暂不可用，请刷新重试。</span>'; updateGenerateButton(); return; }
   availableModels = models;
   if (!models.some(model => model.id === selectedModelId)) selectedModelId = models[0].id;
-  container.innerHTML = models.map(model => `<button class="model-option${model.id === selectedModelId ? ' selected' : ''}" type="button" data-model-id="${escapeHtml(model.id)}"><span class="model-option-top"><b>${escapeHtml(model.label)}</b><small>${escapeHtml(model.speed || '—')}</small></span><span class="model-name">${escapeHtml(model.modelName || model.label)}</span><span class="model-description">${escapeHtml(model.description || '按所选设计语言整理内容。')}</span><span class="model-credits">✦ ${model.credits} 积分</span></button>`).join('');
+  container.innerHTML = models.map(model => `<button class="model-option${model.id === selectedModelId ? ' selected' : ''}" type="button" data-model-id="${escapeHtml(model.id)}"><b>${escapeHtml(model.label)}</b><span class="model-credits">✦ ${model.credits}</span></button>`).join('');
   updateGenerateButton();
 }
 
@@ -327,12 +346,13 @@ function openDocument(work, version) {
   currentDocumentId = work.id;
   currentDocumentVersionId = version.id;
   selectedDesign = version.design || selectedDesign;
-  content.value = version.content;
+  content.value = version.sourceContent || version.content;
   count.textContent = content.value.length;
+  instruction.value = version.instruction || '';
   hasGenerated = true;
   versionCount = Number(work.versionCount);
-  document.querySelector('#source-content').hidden = true;
-  document.querySelector('#prompt-label').textContent = '继续修改';
+  document.querySelector('#source-content').hidden = false;
+  document.querySelector('#prompt-label').textContent = '本版生成要求';
   document.querySelector('#instruction').placeholder = '例如：标题更有力量，正文更精简，结尾更克制。';
   document.querySelector('#generate-hint').textContent = '⌘ Enter 修改';
   renderDocument();
@@ -415,8 +435,6 @@ document.querySelector('#generate').addEventListener('click', async () => {
       headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
       body: JSON.stringify({ modelId: selectedModelId, documentId: currentDocumentId || undefined, parentVersionId: currentDocumentVersionId || undefined, styleTemplateId: selectedStyleTemplateId || undefined, title: content.value.trim().split(/\n/)[0], content: content.value, instruction: instruction.value, history: [...conversationHistory, { role: 'user', content: direction || '请生成第一版视觉作品。' }] })
     });
-    content.value = fragmentText(result.composition.html) || result.composition.title;
-    count.textContent = content.value.length;
     currentDocumentId = result.document.id;
     currentDocumentVersionId = result.document.versionId;
     renderDocument();
@@ -429,7 +447,8 @@ document.querySelector('#generate').addEventListener('click', async () => {
     await loadWallet();
     showToast('作品已生成并安全保存');
   } catch (error) {
-    showToast(error.code === 'insufficient_credits' ? '积分不足，请先充值' : error.code === 'generation_in_progress' ? '正在生成中，请等待当前任务完成' : error.code === 'generation_rate_limited' ? '生成过于频繁，请稍后再试' : error.code === 'model_output_invalid' ? '模型返回格式异常，积分已退回；请重试' : '模型服务暂不可用，积分已退回');
+    await loadWallet().catch(() => {});
+    showGenerationError(error);
   } finally {
     button.disabled = false;
     updateGenerateButton();

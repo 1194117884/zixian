@@ -7,7 +7,7 @@ import { clearSessionCookie, createCode, createSession, hashSecret, normalizeEma
 
 const json = (body, init = {}) => new Response(JSON.stringify(body), {
   ...init,
-  headers: { 'content-type': 'application/json; charset=utf-8', ...init.headers }
+  headers: { 'content-type': 'application/json; charset=utf-8', 'x-robots-tag': 'noindex, nofollow', ...init.headers }
 });
 
 const htmlHeaders = {
@@ -19,14 +19,20 @@ const htmlHeaders = {
 
 const privateHtmlHeaders = {
   ...htmlHeaders,
-  'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+  'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'",
+  'x-robots-tag': 'noindex, nofollow'
 };
 
 const id = () => crypto.randomUUID();
 const slug = () => crypto.randomUUID().replaceAll('-', '').slice(0, 10);
+const escapeXml = value => String(value).replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&apos;', '"': '&quot;' })[character]);
 
 function badRequest(message) {
   return json({ error: 'bad_request', message }, { status: 400 });
+}
+
+function isMissingSchemaError(error) {
+  return /no such (table|column)|has no column named/i.test(error instanceof Error ? error.message : String(error));
 }
 
 async function adminUser(request, env) {
@@ -257,17 +263,20 @@ async function createDocumentForOwner({ ownerId, payload, env }) {
   const documentId = id();
   const versionId = id();
   const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim().slice(0, 120) : '未命名作品';
+  const sourceContent = typeof payload.sourceContent === 'string' ? payload.sourceContent.slice(0, 30000) : payload.content;
+  const instruction = typeof payload.instruction === 'string' ? payload.instruction.slice(0, 6000) : '';
   const objectKey = `documents/${documentId}/versions/${versionId}/safe.html`;
   const design = normalizeDesign(payload.design);
   const htmlFragment = typeof payload.htmlFragment === 'string' ? sanitizeHtmlFragment(payload.htmlFragment) : null;
+  const htmlDocument = typeof payload.htmlDocument === 'string' ? payload.htmlDocument : null;
   if (typeof payload.htmlFragment === 'string' && !htmlFragment) throw new Error('invalid_html_fragment');
-  const html = createSafeDocument({ title, content: payload.content, design, fragment: htmlFragment || undefined });
+  const html = createSafeDocument({ title, content: payload.content, design, fragment: htmlFragment || undefined, htmlDocument: htmlDocument || undefined });
 
   await env.ASSETS.put(objectKey, html, { httpMetadata: { contentType: 'text/html; charset=utf-8' } });
   await env.DB.batch([
     env.DB.prepare('INSERT OR IGNORE INTO users (id) VALUES (?)').bind(ownerId),
     env.DB.prepare('INSERT INTO documents (id, owner_id, title, current_version_id) VALUES (?, ?, ?, ?)').bind(documentId, ownerId, title, versionId),
-    env.DB.prepare('INSERT INTO document_versions (id, document_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?)').bind(versionId, documentId, JSON.stringify({ content: payload.content, design, htmlFragment }), objectKey, 'approved')
+    env.DB.prepare('INSERT INTO document_versions (id, document_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?)').bind(versionId, documentId, JSON.stringify({ content: payload.content, sourceContent, instruction, design, htmlFragment, htmlDocument }), objectKey, 'approved')
   ]);
 
   return { id: documentId, versionId, title, status: 'draft' };
@@ -276,15 +285,18 @@ async function createDocumentForOwner({ ownerId, payload, env }) {
 async function createDocumentVersionForOwner({ ownerId, document, payload, parentVersionId, env }) {
   const versionId = id();
   const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim().slice(0, 120) : document.title;
+  const sourceContent = typeof payload.sourceContent === 'string' ? payload.sourceContent.slice(0, 30000) : payload.content;
+  const instruction = typeof payload.instruction === 'string' ? payload.instruction.slice(0, 6000) : '';
   const objectKey = `documents/${document.id}/versions/${versionId}/safe.html`;
   const design = normalizeDesign(payload.design);
   const htmlFragment = typeof payload.htmlFragment === 'string' ? sanitizeHtmlFragment(payload.htmlFragment) : null;
+  const htmlDocument = typeof payload.htmlDocument === 'string' ? payload.htmlDocument : null;
   if (typeof payload.htmlFragment === 'string' && !htmlFragment) throw new Error('invalid_html_fragment');
-  const html = createSafeDocument({ title, content: payload.content, design, fragment: htmlFragment || undefined });
+  const html = createSafeDocument({ title, content: payload.content, design, fragment: htmlFragment || undefined, htmlDocument: htmlDocument || undefined });
 
   await env.ASSETS.put(objectKey, html, { httpMetadata: { contentType: 'text/html; charset=utf-8' } });
   await env.DB.batch([
-    env.DB.prepare('INSERT INTO document_versions (id, document_id, parent_version_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?, ?)').bind(versionId, document.id, parentVersionId || document.current_version_id, JSON.stringify({ content: payload.content, design, htmlFragment }), objectKey, 'approved'),
+    env.DB.prepare('INSERT INTO document_versions (id, document_id, parent_version_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?, ?)').bind(versionId, document.id, parentVersionId || document.current_version_id, JSON.stringify({ content: payload.content, sourceContent, instruction, design, htmlFragment, htmlDocument }), objectKey, 'approved'),
     env.DB.prepare('UPDATE documents SET title = ?, current_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?').bind(title, versionId, document.id, ownerId)
   ]);
 
@@ -366,12 +378,26 @@ async function servePublishedPage(env, publicSlug) {
   const page = await env.DB.prepare('SELECT version_id FROM published_pages WHERE slug = ?').bind(publicSlug).first();
   if (!page) return new Response('Not found', { status: 404 });
 
-  const version = await env.DB.prepare('SELECT html_object_key FROM document_versions WHERE id = ? AND safety_status = ?').bind(page.version_id, 'approved').first();
+  const version = await env.DB.prepare('SELECT v.html_object_key AS objectKey, v.content_json AS contentJson, d.title FROM document_versions v JOIN documents d ON d.id = v.document_id WHERE v.id = ? AND v.safety_status = ?').bind(page.version_id, 'approved').first();
   if (!version) return new Response('Not found', { status: 404 });
 
-  const object = await env.ASSETS.get(version.html_object_key);
+  const object = await env.ASSETS.get(version.objectKey);
   if (!object) return new Response('Not found', { status: 404 });
-  return new Response(object.body, { headers: htmlHeaders });
+  const content = (() => { try { return JSON.parse(version.contentJson); } catch { return {}; } })();
+  const title = version.title || '字见作品';
+  const description = String(content.sourceContent || content.content || '来自字见的可分享视觉作品。').replace(/\s+/g, ' ').trim().slice(0, 160);
+  const canonical = `${(env.APP_ORIGIN || 'https://zixian.yongkl.cc').replace(/\/$/, '')}/p/${publicSlug}`;
+  const metadata = `<meta name="description" content="${escapeXml(description)}"><meta name="robots" content="index,follow,max-image-preview:large"><link rel="canonical" href="${escapeXml(canonical)}"><meta property="og:type" content="article"><meta property="og:site_name" content="字见"><meta property="og:title" content="${escapeXml(title)}"><meta property="og:description" content="${escapeXml(description)}"><meta property="og:url" content="${escapeXml(canonical)}"><meta name="twitter:card" content="summary"><script type="application/ld+json">${JSON.stringify({ '@context': 'https://schema.org', '@type': 'CreativeWork', name: title, description, url: canonical })}</script>`;
+  const html = (await object.text()).replace(/<\/head\s*>/i, `${metadata}</head>`);
+  return new Response(html, { headers: htmlHeaders });
+}
+
+async function serveSitemap(env) {
+  const origin = (env.APP_ORIGIN || 'https://zixian.yongkl.cc').replace(/\/$/, '');
+  const pages = await env.DB.prepare('SELECT slug, created_at AS createdAt FROM published_pages ORDER BY created_at DESC LIMIT 5000').all();
+  const urls = [{ location: `${origin}/`, lastmod: null }, ...(pages.results || []).map(page => ({ location: `${origin}/p/${page.slug}`, lastmod: String(page.createdAt || '').slice(0, 10) || null }))];
+  const body = `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.map(page => `<url><loc>${escapeXml(page.location)}</loc>${page.lastmod ? `<lastmod>${page.lastmod}</lastmod>` : ''}</url>`).join('')}</urlset>`;
+  return new Response(body, { headers: { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'public, max-age=3600' } });
 }
 
 async function listPublications(request, env) {
@@ -573,7 +599,7 @@ async function createGenerationJob(request, env) {
 
     try {
       if (!(await acquireGenerationLock(env, ownerId, reservation.job.id))) {
-        await refundGenerationCredits({ db: env.DB, ownerId, jobId: reservation.job.id, credits: reservation.job.costCredits });
+        await refundGenerationCredits({ db: env.DB, ownerId, jobId: reservation.job.id, credits: reservation.job.costCredits, errorCode: 'generation_in_progress' });
         return json({ error: 'generation_in_progress' }, { status: 409 });
       }
       try {
@@ -584,7 +610,7 @@ async function createGenerationJob(request, env) {
           title: payload.title,
           content: payload.content,
           instruction: payload.instruction,
-        referenceDesign: reference ? (JSON.parse(reference.content_json).htmlFragment || normalizeDesign(JSON.parse(reference.content_json).design)) : undefined,
+          referenceDesign: reference ? ((JSON.parse(reference.content_json).htmlDocument || JSON.parse(reference.content_json).htmlFragment || normalizeDesign(JSON.parse(reference.content_json).design))) : undefined,
           history: payload.history,
           revision: Boolean(existingDocument),
           systemPromptOverride: aiConfig.systemPrompt,
@@ -595,8 +621,8 @@ async function createGenerationJob(request, env) {
         const { composition } = generated;
         const generatedContent = fragmentText(composition.html);
         const document = existingDocument
-          ? await createDocumentVersionForOwner({ ownerId, document: existingDocument, parentVersionId, payload: { title: composition.title, content: generatedContent, htmlFragment: composition.html }, env })
-          : await createDocumentForOwner({ ownerId, payload: { title: composition.title, content: generatedContent, htmlFragment: composition.html }, env });
+          ? await createDocumentVersionForOwner({ ownerId, document: existingDocument, parentVersionId, payload: { title: composition.title, content: generatedContent, sourceContent: payload.content, instruction: payload.instruction, htmlDocument: composition.html }, env })
+          : await createDocumentForOwner({ ownerId, payload: { title: composition.title, content: generatedContent, sourceContent: payload.content, instruction: payload.instruction, htmlDocument: composition.html }, env });
         await env.DB.prepare("UPDATE generation_jobs SET document_id = ?, status = 'succeeded', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?").bind(document.id, reservation.job.id, ownerId).run();
         await recordGenerationTelemetry(env, reservation.job.id, generated.telemetry).catch(error => console.error('generation telemetry write failed', error));
         return json({ job: { ...reservation.job, status: 'succeeded' }, document, composition }, { status: 201 });
@@ -609,8 +635,9 @@ async function createGenerationJob(request, env) {
         modelId: payload.modelId,
         reason: error instanceof Error ? error.message : 'unknown_error'
       });
-      await refundGenerationCredits({ db: env.DB, ownerId, jobId: reservation.job.id, credits: reservation.job.costCredits });
-      return json({ error: error.message === 'invalid_model_output' ? 'model_output_invalid' : 'model_unavailable' }, { status: 503 });
+      const errorCode = isMissingSchemaError(error) ? 'database_not_ready' : error instanceof Error && error.message === 'invalid_model_output' ? 'model_output_invalid' : 'model_unavailable';
+      const refund = await refundGenerationCredits({ db: env.DB, ownerId, jobId: reservation.job.id, credits: reservation.job.costCredits, errorCode });
+      return json({ error: errorCode, retryable: true, refund }, { status: 503 });
     }
   } catch (error) {
     if (error.message === 'unsupported_model') return badRequest('unsupported model');
@@ -679,17 +706,21 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    try {
+
     if (request.method === 'GET' && url.pathname === '/api/health') {
       return json({ ok: true, service: 'zixian-api', environment: env.APP_ORIGIN ? 'configured' : 'unconfigured' });
     }
+
+    if (request.method === 'GET' && url.pathname === '/sitemap.xml') return await serveSitemap(env);
 
     if (request.method === 'GET' && url.pathname === '/api/models') {
       return json({ models: Object.entries(modelCatalog).map(([id, model]) => ({ id, label: model.label, modelName: model.modelName, speed: model.speed, description: model.description, credits: model.credits })) });
     }
 
-    if (request.method === 'POST' && url.pathname === '/api/auth/request-code') return requestLoginCode(request, env);
-    if (request.method === 'POST' && url.pathname === '/api/auth/verify-code') return verifyLoginCode(request, env);
-    if (request.method === 'POST' && url.pathname === '/api/auth/logout') return logout(request, env);
+    if (request.method === 'POST' && url.pathname === '/api/auth/request-code') return await requestLoginCode(request, env);
+    if (request.method === 'POST' && url.pathname === '/api/auth/verify-code') return await verifyLoginCode(request, env);
+    if (request.method === 'POST' && url.pathname === '/api/auth/logout') return await logout(request, env);
     if (request.method === 'GET' && url.pathname === '/api/auth/me') {
       const currentUserId = await sessionUserId(request, env);
       if (!currentUserId) return json({ error: 'unauthorized' }, { status: 401 });
@@ -697,58 +728,65 @@ export default {
       return json({ user });
     }
 
-    if (request.method === 'GET' && url.pathname === '/api/admin/me') return adminMe(request, env);
-    if (request.method === 'GET' && url.pathname === '/api/admin/overview') return adminOverview(request, env);
-    if ((request.method === 'GET' || request.method === 'PUT') && url.pathname === '/api/admin/ai-config') return adminAiConfig(request, env);
-    if (request.method === 'GET' && url.pathname === '/api/admin/styles') return adminStyles(request, env);
+    if (request.method === 'GET' && url.pathname === '/api/admin/me') return await adminMe(request, env);
+    if (request.method === 'GET' && url.pathname === '/api/admin/overview') return await adminOverview(request, env);
+    if ((request.method === 'GET' || request.method === 'PUT') && url.pathname === '/api/admin/ai-config') return await adminAiConfig(request, env);
+    if (request.method === 'GET' && url.pathname === '/api/admin/styles') return await adminStyles(request, env);
 
     const adminStyleMatch = url.pathname.match(/^\/api\/admin\/styles\/([^/]+)$/);
-    if (request.method === 'PATCH' && adminStyleMatch) return moderateStyle(request, env, adminStyleMatch[1]);
+    if (request.method === 'PATCH' && adminStyleMatch) return await moderateStyle(request, env, adminStyleMatch[1]);
 
-    if (request.method === 'GET' && url.pathname === '/api/wallet') return wallet(request, env);
-    if (request.method === 'POST' && url.pathname === '/api/test-payments') return testPayment(request, env);
-    if (request.method === 'GET' && url.pathname === '/api/publications') return listPublications(request, env);
+    if (request.method === 'GET' && url.pathname === '/api/wallet') return await wallet(request, env);
+    if (request.method === 'POST' && url.pathname === '/api/test-payments') return await testPayment(request, env);
+    if (request.method === 'GET' && url.pathname === '/api/publications') return await listPublications(request, env);
 
-    if (request.method === 'POST' && url.pathname === '/api/generation-jobs') return createGenerationJob(request, env);
+    if (request.method === 'POST' && url.pathname === '/api/generation-jobs') return await createGenerationJob(request, env);
 
-    if (request.method === 'POST' && url.pathname === '/api/documents') return createDocument(request, env);
-    if (request.method === 'GET' && url.pathname === '/api/documents') return listDocuments(request, env);
+    if (request.method === 'POST' && url.pathname === '/api/documents') return await createDocument(request, env);
+    if (request.method === 'GET' && url.pathname === '/api/documents') return await listDocuments(request, env);
 
     const documentMatch = url.pathname.match(/^\/api\/documents\/([^/]+)$/);
-    if (request.method === 'GET' && documentMatch) return getDocument(request, env, documentMatch[1]);
+    if (request.method === 'GET' && documentMatch) return await getDocument(request, env, documentMatch[1]);
 
     const documentPreviewMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/versions\/([^/]+)\/preview$/);
-    if (request.method === 'GET' && documentPreviewMatch) return serveDocumentVersionPreview(request, env, documentPreviewMatch[1], documentPreviewMatch[2]);
+    if (request.method === 'GET' && documentPreviewMatch) return await serveDocumentVersionPreview(request, env, documentPreviewMatch[1], documentPreviewMatch[2]);
 
     const documentVersionsMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/versions$/);
-    if (request.method === 'GET' && documentVersionsMatch) return listDocumentVersions(request, env, documentVersionsMatch[1]);
+    if (request.method === 'GET' && documentVersionsMatch) return await listDocumentVersions(request, env, documentVersionsMatch[1]);
 
     const publishMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/publish$/);
-    if (request.method === 'POST' && publishMatch) return publishDocument(request, env, publishMatch[1]);
+    if (request.method === 'POST' && publishMatch) return await publishDocument(request, env, publishMatch[1]);
 
     const publishStyleMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/styles$/);
-    if (request.method === 'POST' && publishStyleMatch) return publishStyleTemplate(request, env, publishStyleMatch[1]);
+    if (request.method === 'POST' && publishStyleMatch) return await publishStyleTemplate(request, env, publishStyleMatch[1]);
 
-    if (request.method === 'GET' && url.pathname === '/api/styles') return listStyleTemplates(request, env);
+    if (request.method === 'GET' && url.pathname === '/api/styles') return await listStyleTemplates(request, env);
 
     const stylePreviewMatch = url.pathname.match(/^\/api\/styles\/([^/]+)\/preview$/);
-    if (request.method === 'GET' && stylePreviewMatch) return serveStylePreview(request, env, stylePreviewMatch[1]);
+    if (request.method === 'GET' && stylePreviewMatch) return await serveStylePreview(request, env, stylePreviewMatch[1]);
 
     const likeStyleMatch = url.pathname.match(/^\/api\/styles\/([^/]+)\/like$/);
-    if (request.method === 'POST' && likeStyleMatch) return toggleStyleLike(request, env, likeStyleMatch[1]);
+    if (request.method === 'POST' && likeStyleMatch) return await toggleStyleLike(request, env, likeStyleMatch[1]);
 
     const useStyleMatch = url.pathname.match(/^\/api\/styles\/([^/]+)\/use$/);
-    if (request.method === 'POST' && useStyleMatch) return useStyleTemplate(request, env, useStyleMatch[1]);
+    if (request.method === 'POST' && useStyleMatch) return await useStyleTemplate(request, env, useStyleMatch[1]);
 
     const exportMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/exports$/);
-    if (request.method === 'POST' && exportMatch) return createExport(request, env, exportMatch[1]);
+    if (request.method === 'POST' && exportMatch) return await createExport(request, env, exportMatch[1]);
 
     const downloadMatch = url.pathname.match(/^\/api\/exports\/([^/]+)$/);
-    if (request.method === 'GET' && downloadMatch) return serveExport(request, env, downloadMatch[1]);
+    if (request.method === 'GET' && downloadMatch) return await serveExport(request, env, downloadMatch[1]);
 
     const publicMatch = url.pathname.match(/^\/p\/([a-z0-9]+)$/);
-    if (request.method === 'GET' && publicMatch) return servePublishedPage(env, publicMatch[1]);
+    if (request.method === 'GET' && publicMatch) return await servePublishedPage(env, publicMatch[1]);
 
-    return json({ error: 'not_found' }, { status: 404 });
+      return json({ error: 'not_found' }, { status: 404 });
+    } catch (error) {
+      if (isMissingSchemaError(error)) {
+        console.error('[ZiXian] database schema is not ready', error);
+        return json({ error: 'database_not_ready', retryable: true, retryAfter: 30 }, { status: 503 });
+      }
+      throw error;
+    }
   }
 };

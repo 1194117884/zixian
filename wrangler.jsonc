@@ -22,7 +22,7 @@
   },
   "assets": {
     "directory": "public",
-    "run_worker_first": ["/api/*", "/p/*"]
+    "run_worker_first": ["/api/*", "/p/*", "/sitemap.xml"]
   },
   "routes": [
     {

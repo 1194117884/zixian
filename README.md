@@ -18,6 +18,8 @@
 
 这是一个无构建步骤的 Web 原型。生产环境由同一个 Worker 同源提供 `index.html`、CSS、JS 与 `/api/*`，让安全 Cookie 可以正常工作。Worker 侧使用 `npm install` 后可执行 `npm test`；部署前需将 `wrangler.jsonc` 中的 D1 ID 替换为真实值。
 
+使用 `npm run dev` 时会先自动应用本地 D1 中尚未执行的迁移；使用 `npm run deploy` 时会先自动应用远程 D1 迁移，再部署 Worker。请不要直接运行 `wrangler dev` 或 `wrangler deploy`，以免绕过这项检查。Worker 运行时若检测到缺表/缺列，会以可重试的 `database_not_ready` 响应提示服务正在更新，而不会暴露底层数据库错误。
+
 ## 环境变量
 
 本地填写 `.dev.vars`；该文件已被 Git 忽略。部署到 Cloudflare 后，敏感值使用 `wrangler secret put <变量名>` 或 Worker Dashboard 的 Secrets 配置，非敏感值使用环境变量配置。
