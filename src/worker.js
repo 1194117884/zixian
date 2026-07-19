@@ -132,6 +132,12 @@ function validProviderUrl(value) {
   try { const url = new URL(value); return url.protocol === 'https:' && value.length <= 300 ? value : ''; } catch { return ''; }
 }
 
+function configuredSystemPrompt(value) {
+  const prompt = typeof value === 'string' ? value.trim() : '';
+  const legacyDefault = prompt.includes('Never return HTML, CSS, Markdown') && prompt.includes('"paragraphs": string[]') && prompt.includes('"highlight": string');
+  return prompt && !legacyDefault ? prompt : systemPrompt;
+}
+
 async function readAiConfig(env, includeSecrets = false) {
   const row = await env.DB.prepare('SELECT value_json AS valueJson FROM app_settings WHERE setting_key = ?').bind(aiConfigKey).first();
   const stored = (() => { try { return JSON.parse(row?.valueJson || '{}'); } catch { return {}; } })();
@@ -155,7 +161,7 @@ async function readAiConfig(env, includeSecrets = false) {
       if (apiKey) accounts.push({ id: `worker-${defaults.tier}`, ...defaults, ...(includeSecrets ? { apiKey } : {}) });
     }
   }
-  return { systemPrompt: typeof stored.systemPrompt === 'string' && stored.systemPrompt.trim() ? stored.systemPrompt : systemPrompt, accounts: accounts.map(({ apiKey, envKey, ...account }) => ({ ...account, keyConfigured: true, ...(includeSecrets ? { apiKey } : {}) })) };
+  return { systemPrompt: configuredSystemPrompt(stored.systemPrompt), accounts: accounts.map(({ apiKey, envKey, ...account }) => ({ ...account, keyConfigured: true, ...(includeSecrets ? { apiKey } : {}) })) };
 }
 
 async function adminAiConfig(request, env) {

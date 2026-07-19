@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import worker from '../src/worker.js';
 import { createSafeDocument, sanitizeHtmlFragment } from '../src/safe-document.js';
-import { createCompositionPrompt, generateComposition, getModel, parseComposition } from '../src/models.js';
+import { createCompositionPrompt, generateComposition, getModel, parseComposition, systemPrompt } from '../src/models.js';
 import { exportObjectKey, renderHtmlToPng, stylePreviewObjectKey } from '../src/export.js';
 import { hashSecret, normalizeEmail, validEmail } from '../src/auth.js';
 import { grantTestCredits } from '../src/payments.js';
@@ -87,6 +87,7 @@ test('model composition only accepts a bounded structured response', () => {
   assert.match(prompt, /first draft/);
   assert.deepEqual(composition, { title: '标题', html: '<div class="p-8"><p>第一段</p></div>' });
   assert.throws(() => parseComposition('{"title":"x"}'), /invalid_model_output/);
+  assert.match(systemPrompt, /"html": string/);
 });
 
 test('model adapter requests constrained JSON and never accepts HTML output directly', async () => {
