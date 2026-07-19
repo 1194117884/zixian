@@ -62,7 +62,7 @@ function addPreviewToMessage(message, documentVersion) {
   const iframe = document.createElement('iframe');
   iframe.title = `第 ${versionCount} 版作品预览`;
   iframe.sandbox = 'allow-same-origin';
-  iframe.srcdoc = preview.srcdoc;
+  iframe.src = `/api/documents/${encodeURIComponent(documentVersion.id)}/versions/${encodeURIComponent(documentVersion.versionId)}/preview`;
   bubble.append(iframe);
   message.append(bubble);
 
@@ -70,7 +70,8 @@ function addPreviewToMessage(message, documentVersion) {
   actions.className = 'output-actions';
   actions.dataset.documentId = documentVersion.id;
   actions.dataset.versionId = documentVersion.versionId;
-  actions.innerHTML = '<button type="button" data-output-action="share">分享</button><button type="button" data-output-action="export">生成高清图</button><button type="button" data-output-action="style">发布为风格</button>';
+  actions.innerHTML = '<button type="button" data-output-action="share">分享</button><button type="button" data-output-action="export" disabled>生成高清图</button><button type="button" data-output-action="style" disabled>发布为风格</button>';
+  iframe.addEventListener('load', () => actions.querySelectorAll('[data-output-action="export"], [data-output-action="style"]').forEach(button => { button.disabled = false; }));
   message.append(actions);
 }
 

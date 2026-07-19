@@ -17,6 +17,11 @@ const htmlHeaders = {
   'x-content-type-options': 'nosniff'
 };
 
+const privateHtmlHeaders = {
+  ...htmlHeaders,
+  'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+};
+
 const id = () => crypto.randomUUID();
 const slug = () => crypto.randomUUID().replaceAll('-', '').slice(0, 10);
 
@@ -115,6 +120,16 @@ async function listDocumentVersions(request, env, documentId) {
     return { id: version.id, parentVersionId: version.parentVersionId, createdAt: version.createdAt, title: content.trim().split(/\n/)[0].slice(0, 80), current: version.id === document.currentVersionId };
   });
   return json({ document, versions });
+}
+
+async function serveDocumentVersionPreview(request, env, documentId, versionId) {
+  const ownerId = await sessionUserId(request, env);
+  if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
+  const version = await env.DB.prepare('SELECT v.html_object_key FROM document_versions v JOIN documents d ON d.id = v.document_id WHERE v.id = ? AND v.document_id = ? AND v.safety_status = ? AND d.owner_id = ?').bind(versionId, documentId, 'approved', ownerId).first();
+  if (!version) return json({ error: 'not_found' }, { status: 404 });
+  const object = await env.ASSETS.get(version.html_object_key);
+  if (!object) return json({ error: 'not_found' }, { status: 404 });
+  return new Response(object.body, { headers: privateHtmlHeaders });
 }
 
 async function publishDocument(request, env, documentId) {
@@ -460,6 +475,9 @@ export default {
 
     const documentMatch = url.pathname.match(/^\/api\/documents\/([^/]+)$/);
     if (request.method === 'GET' && documentMatch) return getDocument(request, env, documentMatch[1]);
+
+    const documentPreviewMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/versions\/([^/]+)\/preview$/);
+    if (request.method === 'GET' && documentPreviewMatch) return serveDocumentVersionPreview(request, env, documentPreviewMatch[1], documentPreviewMatch[2]);
 
     const documentVersionsMatch = url.pathname.match(/^\/api\/documents\/([^/]+)\/versions$/);
     if (request.method === 'GET' && documentVersionsMatch) return listDocumentVersions(request, env, documentVersionsMatch[1]);

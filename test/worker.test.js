@@ -57,6 +57,13 @@ test('generation job requires a signed session before billing', async () => {
   assert.equal(noKey.status, 401);
 });
 
+test('private document preview requires a signed session', async () => {
+  const response = await worker.fetch(new Request('https://example.test/api/documents/d1/versions/v1/preview'), {});
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: 'unauthorized' });
+});
+
 test('model composition only accepts a bounded structured response', () => {
   const prompt = createCompositionPrompt({ title: '标题', content: '内容', instruction: '' });
   const composition = parseComposition('{"title":"标题","paragraphs":["第一段","第二段"],"highlight":"重点"}');
