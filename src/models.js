@@ -73,7 +73,7 @@ export function parseComposition(value) {
 
 function providerConfig(model, modelId, env, providerOverrides = {}) {
   const configured = Array.isArray(providerOverrides.accounts)
-    ? providerOverrides.accounts.filter(account => account?.apiKey && account?.baseUrl && account?.tier === modelId)
+    ? providerOverrides.accounts.filter(account => account?.enabled !== false && account?.apiKey && account?.baseUrl && account?.tier === modelId)
     : [];
   if (Array.isArray(providerOverrides.accounts)) return { accounts: configured };
   if (model.provider === 'openai-compatible') {

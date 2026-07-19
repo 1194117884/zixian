@@ -129,6 +129,19 @@ test('model adapter spreads requests across accounts and fails over after a rate
   assert.equal(generated.telemetry.selected.outputTokens, 34);
 });
 
+test('model adapter excludes paused channels from routing', async () => {
+  let url = '';
+  await generateComposition({
+    modelId: 'fast', title: '标题', content: '内容', instruction: '', env: {},
+    providerOverrides: { accounts: [{ tier: 'fast', enabled: false, apiKey: 'paused', baseUrl: 'https://paused.example/chat' }, { tier: 'fast', enabled: true, apiKey: 'active', baseUrl: 'https://active.example/chat' }] },
+    fetcher: async requestUrl => {
+      url = requestUrl;
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"title":"标题","html":"<p>正文</p>"}' } }] }), { status: 200 });
+    }
+  });
+  assert.equal(url, 'https://active.example/chat');
+});
+
 test('model adapter exposes invalid structured output separately from an unavailable model', async () => {
   await assert.rejects(
     generateComposition({ modelId: 'fast', title: '标题', content: '内容', instruction: '', env: {}, providerOverrides: { accounts: [{ tier: 'fast', apiKey: 'key', baseUrl: 'https://example.test/chat' }] }, fetcher: async () => new Response(JSON.stringify({ choices: [{ message: { content: '{"title":"标题"}' } }] }), { status: 200 }) }),

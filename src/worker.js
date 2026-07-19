@@ -156,7 +156,7 @@ async function readAiConfig(env, includeSecrets = false) {
     const apiKey = await decryptConfigValue(account?.encryptedKey, env.ADMIN_CONFIG_KEY);
     if (!baseUrl || !apiKey || !validTiers.has(account?.tier)) continue;
     const apiFormat = account?.apiFormat === 'anthropic' || (!account?.apiFormat && account?.platform?.toLowerCase().includes('anthropic')) ? 'anthropic' : 'openai';
-    accounts.push({ id: typeof account.id === 'string' ? account.id : id(), platform: typeof account.platform === 'string' ? account.platform.slice(0, 40) : '', apiFormat, modelName: typeof account.modelName === 'string' ? account.modelName.slice(0, 100) : '', tier: account.tier, baseUrl, ...(includeSecrets ? { apiKey } : {}) });
+    accounts.push({ id: typeof account.id === 'string' ? account.id : id(), platform: typeof account.platform === 'string' ? account.platform.slice(0, 40) : '', apiFormat, modelName: typeof account.modelName === 'string' ? account.modelName.slice(0, 100) : '', tier: account.tier, baseUrl, enabled: account.enabled !== false, ...(includeSecrets ? { apiKey } : {}) });
   }
   if (!accounts.length) {
     for (const defaults of Object.values(legacyProviders)) {
@@ -196,7 +196,7 @@ async function adminAiConfig(request, env) {
       try { encryptedKey = await encryptConfigValue(apiKey, env.ADMIN_CONFIG_KEY); } catch { return json({ error: 'config_secret_unavailable' }, { status: 409 }); }
     }
     if (!encryptedKey) return badRequest('API Key is required for every channel');
-    stored.accounts.push({ id: accountId, platform, apiFormat, modelName, tier: input.tier, baseUrl, encryptedKey });
+    stored.accounts.push({ id: accountId, platform, apiFormat, modelName, tier: input.tier, baseUrl, enabled: input.enabled !== false, encryptedKey });
   }
   await env.DB.batch([
     env.DB.prepare('INSERT INTO app_settings (setting_key, value_json, updated_by) VALUES (?, ?, ?) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP').bind(aiConfigKey, JSON.stringify(stored), identity.user.id),

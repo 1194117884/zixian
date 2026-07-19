@@ -72,7 +72,7 @@ function fillAiConfig(config) {
 function accountRow(account = {}) {
   const formatName = `format-${account.id || crypto.randomUUID()}`;
   const openai = account.apiFormat !== 'anthropic';
-  return `<div class="account-row" data-id="${escapeHtml(account.id || '')}"><input data-field="platform" value="${escapeHtml(account.platform || '')}" maxlength="40" placeholder="平台，如 DeepSeek"><span class="api-format"><label><input type="radio" name="${formatName}" data-field="apiFormat" value="openai" ${openai ? 'checked' : ''}> OAI 兼容</label><label><input type="radio" name="${formatName}" data-field="apiFormat" value="anthropic" ${openai ? '' : 'checked'}> Anthropic</label></span><input data-field="baseUrl" type="url" value="${escapeHtml(account.baseUrl || '')}" placeholder="接口地址 https://..."><input data-field="modelName" value="${escapeHtml(account.modelName || '')}" maxlength="100" placeholder="模型名称"><input data-field="apiKey" type="password" autocomplete="new-password" placeholder="${account.id ? '新的 API Key（留空不变）' : 'API Key'}"><select data-field="tier"><option value="fast" ${account.tier === 'fast' ? 'selected' : ''}>快速创作</option><option value="precise" ${account.tier === 'precise' ? 'selected' : ''}>精致排版</option><option value="studio" ${account.tier === 'studio' ? 'selected' : ''}>旗舰创作</option></select><button type="button" class="remove-account">移除</button></div>`;
+  return `<div class="account-row" data-id="${escapeHtml(account.id || '')}"><input data-field="platform" value="${escapeHtml(account.platform || '')}" maxlength="40" placeholder="平台，如 DeepSeek"><span class="api-format"><label><input type="radio" name="${formatName}" data-field="apiFormat" value="openai" ${openai ? 'checked' : ''}> OAI 兼容</label><label><input type="radio" name="${formatName}" data-field="apiFormat" value="anthropic" ${openai ? '' : 'checked'}> Anthropic</label></span><input data-field="baseUrl" type="url" value="${escapeHtml(account.baseUrl || '')}" placeholder="接口地址 https://..."><input data-field="modelName" value="${escapeHtml(account.modelName || '')}" maxlength="100" placeholder="模型名称"><input data-field="apiKey" type="password" autocomplete="new-password" placeholder="${account.id ? '新的 API Key（留空不变）' : 'API Key'}"><select data-field="tier"><option value="fast" ${account.tier === 'fast' ? 'selected' : ''}>快速创作</option><option value="precise" ${account.tier === 'precise' ? 'selected' : ''}>精致排版</option><option value="studio" ${account.tier === 'studio' ? 'selected' : ''}>旗舰创作</option></select><label class="account-enabled"><input data-field="enabled" type="checkbox" ${account.enabled !== false ? 'checked' : ''}> 启用</label><button type="button" class="remove-account">移除</button></div>`;
 }
 
 function renderAccounts(accounts = []) {
@@ -99,7 +99,8 @@ async function saveAiConfig(event) {
     modelName: row.querySelector('[data-field="modelName"]').value,
     apiKey: row.querySelector('[data-field="apiKey"]').value,
     apiFormat: row.querySelector('[data-field="apiFormat"]:checked').value,
-    tier: row.querySelector('[data-field="tier"]').value
+    tier: row.querySelector('[data-field="tier"]').value,
+    enabled: row.querySelector('[data-field="enabled"]').checked
   }));
   try {
     const config = await api('/api/admin/ai-config', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ systemPrompt: document.querySelector('#system-prompt').value, accounts }) });
