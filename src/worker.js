@@ -1,6 +1,6 @@
 import { createSafeDocument, normalizeDesign } from './safe-document.js';
 import { generateComposition, modelCatalog } from './models.js';
-import { refundGenerationCredits, reserveGenerationCredits } from './credits.js';
+import { refundCloudRenderCredits, refundGenerationCredits, reserveCloudRenderCredits, reserveGenerationCredits } from './credits.js';
 import { grantTestCredits } from './payments.js';
 import { exportObjectKey, renderHtmlToPng, stylePreviewObjectKey } from './export.js';
 import { clearSessionCookie, createCode, createSession, hashSecret, normalizeEmail, sendCodeEmail, sessionCookie, sessionUserId, validEmail } from './auth.js';
@@ -263,6 +263,8 @@ async function useStyleTemplate(request, env, templateId) {
 async function createExport(request, env, documentId) {
   const ownerId = await sessionUserId(request, env);
   if (!ownerId) return json({ error: 'unauthorized' }, { status: 401 });
+  const idempotencyKey = request.headers.get('idempotency-key');
+  if (!idempotencyKey) return badRequest('idempotency-key header is required');
   const payload = await request.json().catch(() => ({}));
 
   const document = await env.DB.prepare('SELECT id, current_version_id FROM documents WHERE id = ? AND owner_id = ?').bind(documentId, ownerId).first();
@@ -274,15 +276,27 @@ async function createExport(request, env, documentId) {
   const htmlObject = await env.ASSETS.get(version.html_object_key);
   if (!htmlObject) return json({ error: 'not_found' }, { status: 404 });
 
+  const reservation = await reserveCloudRenderCredits({ db: env.DB, ownerId, documentId: document.id, versionId: version.id, idempotencyKey });
+  if (reservation.state === 'insufficient_credits') return json({ error: 'insufficient_credits' }, { status: 402 });
+  if (reservation.state === 'existing') {
+    if (reservation.job.status === 'succeeded' && reservation.job.export_id) return json({ id: reservation.job.export_id, downloadUrl: `/api/exports/${reservation.job.export_id}` });
+    return json({ error: 'render_in_progress' }, { status: 409 });
+  }
+
   try {
+    await env.DB.prepare("UPDATE render_jobs SET status = 'running' WHERE id = ? AND owner_id = ?").bind(reservation.job.id, ownerId).run();
     const exportId = id();
     const objectKey = exportObjectKey({ documentId, versionId: version.id, exportId });
     const png = await renderHtmlToPng(env.BROWSER, await htmlObject.text());
     await env.ASSETS.put(objectKey, png, { httpMetadata: { contentType: 'image/png' } });
-    await env.DB.prepare('INSERT INTO exports (id, owner_id, document_id, version_id, object_key) VALUES (?, ?, ?, ?, ?)').bind(exportId, ownerId, documentId, version.id, objectKey).run();
-    return json({ id: exportId, downloadUrl: `/api/exports/${exportId}` }, { status: 201 });
+    await env.DB.batch([
+      env.DB.prepare('INSERT INTO exports (id, owner_id, document_id, version_id, object_key) VALUES (?, ?, ?, ?, ?)').bind(exportId, ownerId, documentId, version.id, objectKey),
+      env.DB.prepare("UPDATE render_jobs SET export_id = ?, status = 'succeeded', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ? AND status = 'running'").bind(exportId, reservation.job.id, ownerId)
+    ]);
+    return json({ id: exportId, downloadUrl: `/api/exports/${exportId}`, credits: reservation.job.costCredits }, { status: 201 });
   } catch (error) {
     console.error('document export render failed', error);
+    await refundCloudRenderCredits({ db: env.DB, ownerId, jobId: reservation.job.id, credits: reservation.job.costCredits });
     return json({ error: error.message === 'render_failed' ? 'render_failed' : 'render_unavailable' }, { status: 503 });
   }
 }

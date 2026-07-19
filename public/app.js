@@ -423,8 +423,10 @@ document.querySelector('#conversation').addEventListener('click', async event =>
         await downloadPreviewPng(actions);
         showToast('高清图已开始下载');
       } catch {
-        showToast('正在生成高清图…');
-        const output = await api(`/api/documents/${documentId}/exports`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ versionId }) });
+        if (!window.confirm('本地合成不可用。使用云端合成将扣除 1 积分，是否继续？')) return;
+        showToast('正在云端生成高清图…');
+        const output = await api(`/api/documents/${documentId}/exports`, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() }, body: JSON.stringify({ versionId }) });
+        await loadWallet();
         window.location.assign(output.downloadUrl);
       }
     }
@@ -436,7 +438,7 @@ document.querySelector('#conversation').addEventListener('click', async event =>
       dialog.showModal();
     }
   } catch (error) {
-    const message = button.dataset.outputAction === 'share' ? '发布失败，请稍后重试' : button.dataset.outputAction === 'export' ? '截图服务暂不可用，请确认本地开发服务已重启' : error.code === 'already_published' ? '这份作品已经发布为风格' : error.code === 'render_unavailable' ? '截图服务暂不可用，请确认本地开发服务已重启' : '风格发布失败，请稍后重试';
+    const message = button.dataset.outputAction === 'share' ? '发布失败，请稍后重试' : button.dataset.outputAction === 'export' ? error.code === 'insufficient_credits' ? '积分不足，请先充值' : '截图服务暂不可用，已自动退回积分' : error.code === 'already_published' ? '这份作品已经发布为风格' : error.code === 'render_unavailable' ? '截图服务暂不可用，请确认本地开发服务已重启' : '风格发布失败，请稍后重试';
     showToast(message);
   } finally {
     button.disabled = false;

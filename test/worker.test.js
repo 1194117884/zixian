@@ -6,7 +6,7 @@ import { createCompositionPrompt, generateComposition, getModel, parseCompositio
 import { exportObjectKey, renderHtmlToPng, stylePreviewObjectKey } from '../src/export.js';
 import { hashSecret, normalizeEmail, validEmail } from '../src/auth.js';
 import { grantTestCredits } from '../src/payments.js';
-import { refundGenerationCredits } from '../src/credits.js';
+import { CLOUD_RENDER_CREDITS, refundCloudRenderCredits, refundGenerationCredits, reserveCloudRenderCredits } from '../src/credits.js';
 
 test('health endpoint identifies the worker', async () => {
   const response = await worker.fetch(new Request('https://example.test/api/health'), { APP_ORIGIN: 'http://localhost:4173' });
@@ -134,6 +134,39 @@ test('failed generation refunds only through the existing credit ledger', async 
   await refundGenerationCredits({ db, ownerId: 'u1', jobId: 'j1', credits: 6 });
 
   assert.match(statements[0].sql, /status = 'refunded'/);
+  assert.match(statements[1].sql, /'refund'/);
+  assert.match(statements[2].sql, /balance = balance \+ \?/);
+});
+
+test('cloud render reserves one credit in the server ledger', async () => {
+  const statements = [];
+  const db = {
+    prepare(sql) {
+      return { bind(...values) { statements.push({ sql, values }); return { first: async () => null }; } };
+    },
+    batch: async () => [{ meta: { changes: 1 } }]
+  };
+
+  const result = await reserveCloudRenderCredits({ db, ownerId: 'u1', documentId: 'd1', versionId: 'v1', idempotencyKey: 'render-1' });
+
+  assert.equal(CLOUD_RENDER_CREDITS, 1);
+  assert.equal(result.state, 'reserved');
+  assert.ok(statements.some(statement => /'cloud_render'/.test(statement.sql)));
+  assert.ok(statements.some(statement => /INSERT INTO render_jobs/.test(statement.sql)));
+});
+
+test('failed cloud render refunds through the server ledger', async () => {
+  const statements = [];
+  const db = {
+    prepare(sql) {
+      return { bind(...values) { statements.push({ sql, values }); return {}; } };
+    },
+    batch: async () => undefined
+  };
+
+  await refundCloudRenderCredits({ db, ownerId: 'u1', jobId: 'r1' });
+
+  assert.match(statements[0].sql, /render_jobs SET status = 'refunded'/);
   assert.match(statements[1].sql, /'refund'/);
   assert.match(statements[2].sql, /balance = balance \+ \?/);
 });
