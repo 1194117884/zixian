@@ -34,11 +34,12 @@ export function getModel(modelId) {
 
 export const systemPrompt = [
   'You are ZiXian, an exacting visual editor for shareable static documents.',
-  'Return valid JSON only. Never return HTML, CSS, Markdown, links, scripts, or commentary.',
-  'The JSON schema is: {"title": string, "paragraphs": string[], "highlight": string, "design": {"background":"#RRGGBB","foreground":"#RRGGBB","accent":"#RRGGBB","label":string}}.',
+  'Return valid JSON only. Never return Markdown, links, scripts, commentary, or a full HTML document.',
+  'The JSON schema is: {"title": string, "html": string}. html must be a body fragment made only of div, p, h1, h2, h3, span, strong, em, blockquote, ul, ol, li, br, hr, with class attributes only.',
+  'Use only these Tailwind-compatible utility classes: min-h-screen w-full max-w-2xl max-w-3xl max-w-4xl mx-auto flex grid block items-center justify-between gap-2 gap-3 gap-4 gap-6 gap-8 space-y-2 space-y-3 space-y-4 space-y-6 space-y-8 space-y-12 p-6 p-8 p-10 p-12 px-6 px-8 py-3 py-6 py-8 py-12 pt-8 pt-16 pb-8 pb-16 mt-2 mt-4 mt-6 mt-8 mt-12 mt-16 mb-2 mb-4 mb-6 mb-8 mb-12 bg-white bg-stone-50 bg-stone-100 bg-stone-900 bg-black text-white text-black text-stone-500 text-stone-600 text-stone-700 text-stone-800 text-stone-900 border border-2 border-black border-stone-200 border-stone-300 border-l-4 border-l-8 rounded rounded-lg rounded-2xl text-xs text-sm text-base text-lg text-xl text-2xl text-3xl text-4xl text-5xl font-normal font-medium font-semibold font-bold font-serif font-sans leading-relaxed leading-tight tracking-wide tracking-widest uppercase italic text-center text-left shadow-sm shadow-lg.',
   'When the creator gives a revision direction, you MUST apply it visibly. Preserve the core idea unless they ask to rewrite it.',
   'Create a fresh safe design palette for the creator. If a style reference is provided, treat it only as inspiration; the output remains the creator’s own design. Do not ignore visual directions.',
-  'Keep paragraphs to six or fewer and make the highlight distinct from the body.'
+  'Build an original static visual composition inside html. Do not use style attributes, ids, images, URLs, forms, SVG, or JavaScript.'
 ].join(' ');
 
 function conversationMessages(history) {
@@ -61,18 +62,12 @@ export function createCompositionPrompt({ title, content, instruction, reference
 
 export function parseComposition(value) {
   const parsed = typeof value === 'string' ? JSON.parse(value) : value;
-  if (!parsed || typeof parsed.title !== 'string' || !Array.isArray(parsed.paragraphs) || typeof parsed.highlight !== 'string') {
+  if (!parsed || typeof parsed.title !== 'string' || typeof parsed.html !== 'string' || !parsed.html.trim()) {
     throw new Error('invalid_model_output');
   }
-
-  const paragraphs = parsed.paragraphs.filter(paragraph => typeof paragraph === 'string' && paragraph.trim()).slice(0, 6);
-  if (!paragraphs.length) throw new Error('invalid_model_output');
-
   return {
     title: parsed.title.trim().slice(0, 120),
-    paragraphs: paragraphs.map(paragraph => paragraph.trim().slice(0, 2000)),
-    highlight: parsed.highlight.trim().slice(0, 500),
-    design: parsed.design && typeof parsed.design === 'object' ? parsed.design : {}
+    html: parsed.html.trim().slice(0, 30000)
   };
 }
 

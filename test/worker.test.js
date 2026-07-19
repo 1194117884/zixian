@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import worker from '../src/worker.js';
-import { createSafeDocument } from '../src/safe-document.js';
+import { createSafeDocument, sanitizeHtmlFragment } from '../src/safe-document.js';
 import { createCompositionPrompt, generateComposition, getModel, parseComposition } from '../src/models.js';
 import { exportObjectKey, renderHtmlToPng, stylePreviewObjectKey } from '../src/export.js';
 import { hashSecret, normalizeEmail, validEmail } from '../src/auth.js';
@@ -34,6 +34,15 @@ test('safe document escapes user-provided markup and has no script execution', (
   assert.doesNotMatch(html, /<script>/);
   assert.doesNotMatch(html, /min-height:100vh/);
   assert.match(createSafeDocument({ title: '标题', content: '正文', design: { background: '#113355', foreground: '#ffffff', accent: '#ffcc00', label: 'MY DESIGN' } }), /#113355/);
+});
+
+test('AI HTML fragments retain only allowed tags and Tailwind utility classes', () => {
+  const fragment = sanitizeHtmlFragment('<div class="p-8 bg-stone-50 evil" onclick="alert(1)"><h1 class="text-4xl font-serif">标题</h1><script>alert(1)</script><img src=x><p style="color:red">正文</p></div>');
+  const html = createSafeDocument({ title: '标题', fragment });
+
+  assert.match(fragment, /class="p-8 bg-stone-50"/);
+  assert.doesNotMatch(fragment, /onclick|script|img|style=/);
+  assert.match(html, /\.p-8\{padding:2rem/);
 });
 
 test('model catalog exposes fixed credit costs', () => {
@@ -73,10 +82,10 @@ test('admin endpoints require a signed administrator session', async () => {
 
 test('model composition only accepts a bounded structured response', () => {
   const prompt = createCompositionPrompt({ title: '标题', content: '内容', instruction: '' });
-  const composition = parseComposition('{"title":"标题","paragraphs":["第一段","第二段"],"highlight":"重点"}');
+  const composition = parseComposition('{"title":"标题","html":"<div class=\\"p-8\\"><p>第一段</p></div>"}');
 
   assert.match(prompt, /first draft/);
-  assert.deepEqual(composition, { title: '标题', paragraphs: ['第一段', '第二段'], highlight: '重点', design: {} });
+  assert.deepEqual(composition, { title: '标题', html: '<div class="p-8"><p>第一段</p></div>' });
   assert.throws(() => parseComposition('{"title":"x"}'), /invalid_model_output/);
 });
 
@@ -86,7 +95,7 @@ test('model adapter requests constrained JSON and never accepts HTML output dire
     modelId: 'fast', title: '标题', content: '内容', instruction: '改成炫彩赛博朋克', history: [{ role: 'user', content: '先做第一版' }], revision: true, env: { DEEPSEEK_API_KEY: 'key' }, systemPromptOverride: '后台提示词', providerOverrides: { deepseek: { apiKey: 'admin-key', baseUrl: 'https://gateway.example/v1/chat/completions' } },
     fetcher: async (url, options) => {
       request = { url, options };
-      return new Response(JSON.stringify({ choices: [{ message: { content: '{"title":"标题","paragraphs":["正文"],"highlight":"重点","design":{"background":"#113355","foreground":"#ffffff","accent":"#ffcc00","label":"MY DESIGN"}}' } }] }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"title":"标题","html":"<div class=\\"p-8\\"><h1 class=\\"text-4xl\\">标题</h1><p>正文</p></div>"}' } }] }), { status: 200 });
     }
   });
 
@@ -95,7 +104,7 @@ test('model adapter requests constrained JSON and never accepts HTML output dire
   assert.deepEqual(JSON.parse(request.options.body).response_format, { type: 'json_object' });
   assert.equal(JSON.parse(request.options.body).messages[0].content, '后台提示词');
   assert.equal(JSON.parse(request.options.body).messages[1].content, '先做第一版');
-  assert.deepEqual(generated.composition, { title: '标题', paragraphs: ['正文'], highlight: '重点', design: { background: '#113355', foreground: '#ffffff', accent: '#ffcc00', label: 'MY DESIGN' } });
+  assert.deepEqual(generated.composition, { title: '标题', html: '<div class="p-8"><h1 class="text-4xl">标题</h1><p>正文</p></div>' });
 });
 
 test('model adapter spreads requests across accounts and fails over after a rate limit', async () => {
@@ -106,7 +115,7 @@ test('model adapter spreads requests across accounts and fails over after a rate
     fetcher: async (url, options) => {
       attempts.push({ url, key: options.headers.authorization, modelName: JSON.parse(options.body).model });
       if (attempts.length === 1) return new Response('busy', { status: 429 });
-      return new Response(JSON.stringify({ choices: [{ message: { content: '{"title":"标题","paragraphs":["正文"],"highlight":"重点"}' } }], usage: { prompt_tokens: 21, completion_tokens: 34 } }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"title":"标题","html":"<div class=\\"p-8\\"><p>正文</p></div>"}' } }], usage: { prompt_tokens: 21, completion_tokens: 34 } }), { status: 200 });
     }
   });
 

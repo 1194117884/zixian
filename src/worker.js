@@ -1,4 +1,4 @@
-import { createSafeDocument, normalizeDesign } from './safe-document.js';
+import { createSafeDocument, fragmentText, normalizeDesign, sanitizeHtmlFragment } from './safe-document.js';
 import { generateComposition, modelCatalog, systemPrompt } from './models.js';
 import { refundCloudRenderCredits, refundGenerationCredits, reserveCloudRenderCredits, reserveGenerationCredits } from './credits.js';
 import { grantTestCredits } from './payments.js';
@@ -243,13 +243,15 @@ async function createDocumentForOwner({ ownerId, payload, env }) {
   const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim().slice(0, 120) : '未命名作品';
   const objectKey = `documents/${documentId}/versions/${versionId}/safe.html`;
   const design = normalizeDesign(payload.design);
-  const html = createSafeDocument({ title, content: payload.content, design });
+  const htmlFragment = typeof payload.htmlFragment === 'string' ? sanitizeHtmlFragment(payload.htmlFragment) : null;
+  if (typeof payload.htmlFragment === 'string' && !htmlFragment) throw new Error('invalid_html_fragment');
+  const html = createSafeDocument({ title, content: payload.content, design, fragment: htmlFragment || undefined });
 
   await env.ASSETS.put(objectKey, html, { httpMetadata: { contentType: 'text/html; charset=utf-8' } });
   await env.DB.batch([
     env.DB.prepare('INSERT OR IGNORE INTO users (id) VALUES (?)').bind(ownerId),
     env.DB.prepare('INSERT INTO documents (id, owner_id, title, current_version_id) VALUES (?, ?, ?, ?)').bind(documentId, ownerId, title, versionId),
-    env.DB.prepare('INSERT INTO document_versions (id, document_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?)').bind(versionId, documentId, JSON.stringify({ content: payload.content, design }), objectKey, 'approved')
+    env.DB.prepare('INSERT INTO document_versions (id, document_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?)').bind(versionId, documentId, JSON.stringify({ content: payload.content, design, htmlFragment }), objectKey, 'approved')
   ]);
 
   return { id: documentId, versionId, title, status: 'draft' };
@@ -260,11 +262,13 @@ async function createDocumentVersionForOwner({ ownerId, document, payload, paren
   const title = typeof payload.title === 'string' && payload.title.trim() ? payload.title.trim().slice(0, 120) : document.title;
   const objectKey = `documents/${document.id}/versions/${versionId}/safe.html`;
   const design = normalizeDesign(payload.design);
-  const html = createSafeDocument({ title, content: payload.content, design });
+  const htmlFragment = typeof payload.htmlFragment === 'string' ? sanitizeHtmlFragment(payload.htmlFragment) : null;
+  if (typeof payload.htmlFragment === 'string' && !htmlFragment) throw new Error('invalid_html_fragment');
+  const html = createSafeDocument({ title, content: payload.content, design, fragment: htmlFragment || undefined });
 
   await env.ASSETS.put(objectKey, html, { httpMetadata: { contentType: 'text/html; charset=utf-8' } });
   await env.DB.batch([
-    env.DB.prepare('INSERT INTO document_versions (id, document_id, parent_version_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?, ?)').bind(versionId, document.id, parentVersionId || document.current_version_id, JSON.stringify({ content: payload.content, design }), objectKey, 'approved'),
+    env.DB.prepare('INSERT INTO document_versions (id, document_id, parent_version_id, content_json, html_object_key, safety_status) VALUES (?, ?, ?, ?, ?, ?)').bind(versionId, document.id, parentVersionId || document.current_version_id, JSON.stringify({ content: payload.content, design, htmlFragment }), objectKey, 'approved'),
     env.DB.prepare('UPDATE documents SET title = ?, current_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?').bind(title, versionId, document.id, ownerId)
   ]);
 
@@ -564,7 +568,7 @@ async function createGenerationJob(request, env) {
           title: payload.title,
           content: payload.content,
           instruction: payload.instruction,
-          referenceDesign: reference ? normalizeDesign(JSON.parse(reference.content_json).design) : undefined,
+        referenceDesign: reference ? (JSON.parse(reference.content_json).htmlFragment || normalizeDesign(JSON.parse(reference.content_json).design)) : undefined,
           history: payload.history,
           revision: Boolean(existingDocument),
           systemPromptOverride: aiConfig.systemPrompt,
@@ -573,10 +577,10 @@ async function createGenerationJob(request, env) {
           env
         });
         const { composition } = generated;
-        const generatedContent = [...composition.paragraphs, composition.highlight].join('\n\n');
+        const generatedContent = fragmentText(composition.html);
         const document = existingDocument
-          ? await createDocumentVersionForOwner({ ownerId, document: existingDocument, parentVersionId, payload: { title: composition.title, content: generatedContent, design: composition.design }, env })
-          : await createDocumentForOwner({ ownerId, payload: { title: composition.title, content: generatedContent, design: composition.design }, env });
+          ? await createDocumentVersionForOwner({ ownerId, document: existingDocument, parentVersionId, payload: { title: composition.title, content: generatedContent, htmlFragment: composition.html }, env })
+          : await createDocumentForOwner({ ownerId, payload: { title: composition.title, content: generatedContent, htmlFragment: composition.html }, env });
         await env.DB.prepare("UPDATE generation_jobs SET document_id = ?, status = 'succeeded', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?").bind(document.id, reservation.job.id, ownerId).run();
         await recordGenerationTelemetry(env, reservation.job.id, generated.telemetry).catch(error => console.error('generation telemetry write failed', error));
         return json({ job: { ...reservation.job, status: 'succeeded' }, document, composition }, { status: 201 });

@@ -27,6 +27,10 @@ function escapeHtml(value) {
   return value.replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
 }
 
+function fragmentText(value) {
+  return String(value).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function localExportError(stage, cause) {
   const error = new Error(`local_export_${stage}`);
   error.cause = cause;
@@ -411,11 +415,10 @@ document.querySelector('#generate').addEventListener('click', async () => {
       headers: { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() },
       body: JSON.stringify({ modelId: selectedModelId, documentId: currentDocumentId || undefined, parentVersionId: currentDocumentVersionId || undefined, styleTemplateId: selectedStyleTemplateId || undefined, title: content.value.trim().split(/\n/)[0], content: content.value, instruction: instruction.value, history: [...conversationHistory, { role: 'user', content: direction || '请生成第一版视觉作品。' }] })
     });
-    content.value = [result.composition.title, ...result.composition.paragraphs, result.composition.highlight].join('\n\n');
+    content.value = fragmentText(result.composition.html) || result.composition.title;
     count.textContent = content.value.length;
     currentDocumentId = result.document.id;
     currentDocumentVersionId = result.document.versionId;
-    selectedDesign = result.composition.design || selectedDesign;
     renderDocument();
     showGeneratedDocument();
     if (initialGeneration) addConversationMessage('user', direction || '请将这段内容制作为可分享的视觉作品。');
