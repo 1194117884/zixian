@@ -129,6 +129,13 @@ test('model adapter spreads requests across accounts and fails over after a rate
   assert.equal(generated.telemetry.selected.outputTokens, 34);
 });
 
+test('model adapter exposes invalid structured output separately from an unavailable model', async () => {
+  await assert.rejects(
+    generateComposition({ modelId: 'fast', title: '标题', content: '内容', instruction: '', env: {}, providerOverrides: { accounts: [{ tier: 'fast', apiKey: 'key', baseUrl: 'https://example.test/chat' }] }, fetcher: async () => new Response(JSON.stringify({ choices: [{ message: { content: '{"title":"标题"}' } }] }), { status: 200 }) }),
+    /invalid_model_output/
+  );
+});
+
 test('export uses a fixed R2 key and stores Browser Run PNG output', async () => {
   const browser = { quickAction: async (action, request) => {
     assert.equal(action, 'screenshot');

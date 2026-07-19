@@ -429,7 +429,7 @@ document.querySelector('#generate').addEventListener('click', async () => {
     await loadWallet();
     showToast('作品已生成并安全保存');
   } catch (error) {
-    showToast(error.code === 'insufficient_credits' ? '积分不足，请先充值' : error.code === 'generation_in_progress' ? '正在生成中，请等待当前任务完成' : error.code === 'generation_rate_limited' ? '生成过于频繁，请稍后再试' : '生成失败，积分已退回');
+    showToast(error.code === 'insufficient_credits' ? '积分不足，请先充值' : error.code === 'generation_in_progress' ? '正在生成中，请等待当前任务完成' : error.code === 'generation_rate_limited' ? '生成过于频繁，请稍后再试' : error.code === 'model_output_invalid' ? '模型返回格式异常，积分已退回；请重试' : '模型服务暂不可用，积分已退回');
   } finally {
     button.disabled = false;
     updateGenerateButton();

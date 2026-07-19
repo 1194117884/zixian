@@ -127,6 +127,7 @@ export async function generateComposition({ modelId, title, content, instruction
   const prompt = createCompositionPrompt({ title, content, instruction, referenceDesign, revision });
   const messages = [...conversationMessages(history), { role: 'user', content: prompt }];
   const attempts = [];
+  let invalidOutput = false;
   for (const account of orderedAccounts(config.accounts, requestKey)) {
     const anthropic = account.apiFormat === 'anthropic' || (!account.apiFormat && model.provider === 'anthropic-compatible');
     const attempt = { accountId: account.id || '', platform: account.platform || 'Worker Secret', modelName: account.modelName || model.defaultModel, httpStatus: null, errorCode: null, inputTokens: 0, outputTokens: 0 };
@@ -156,9 +157,10 @@ export async function generateComposition({ modelId, title, content, instruction
       return { composition, telemetry: { selected: attempt, attempts } };
     } catch (error) {
       if (error.message === 'model_unavailable') throw error;
+      if (error.message === 'invalid_model_output') invalidOutput = true;
       attempt.errorCode = error.message === 'invalid_model_output' ? 'invalid_model_output' : 'network_error';
       attempts.push(attempt);
     }
   }
-  throw new Error('model_unavailable');
+  throw new Error(invalidOutput ? 'invalid_model_output' : 'model_unavailable');
 }

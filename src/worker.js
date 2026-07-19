@@ -132,15 +132,18 @@ function validProviderUrl(value) {
   try { const url = new URL(value); return url.protocol === 'https:' && value.length <= 300 ? value : ''; } catch { return ''; }
 }
 
-function configuredSystemPrompt(value) {
+function isLegacySystemPrompt(value) {
   const prompt = typeof value === 'string' ? value.trim() : '';
-  const legacyDefault = prompt.includes('Never return HTML, CSS, Markdown') && prompt.includes('"paragraphs": string[]') && prompt.includes('"highlight": string');
-  return prompt && !legacyDefault ? prompt : systemPrompt;
+  return prompt.includes('Never return HTML, CSS, Markdown') && prompt.includes('"paragraphs": string[]') && prompt.includes('"highlight": string');
 }
 
 async function readAiConfig(env, includeSecrets = false) {
-  const row = await env.DB.prepare('SELECT value_json AS valueJson FROM app_settings WHERE setting_key = ?').bind(aiConfigKey).first();
+  const row = await env.DB.prepare('SELECT value_json AS valueJson, updated_by AS updatedBy FROM app_settings WHERE setting_key = ?').bind(aiConfigKey).first();
   const stored = (() => { try { return JSON.parse(row?.valueJson || '{}'); } catch { return {}; } })();
+  if (isLegacySystemPrompt(stored.systemPrompt) && row?.updatedBy) {
+    stored.systemPrompt = systemPrompt;
+    await env.DB.prepare('UPDATE app_settings SET value_json = ?, updated_at = CURRENT_TIMESTAMP WHERE setting_key = ?').bind(JSON.stringify(stored), aiConfigKey).run();
+  }
   const legacyAccounts = Object.entries(legacyProviders).flatMap(([name, defaults]) => {
     const entry = stored.providers?.[name] || {};
     const accounts = Array.isArray(entry.accounts) ? entry.accounts : entry.encryptedKey ? [{ id: `legacy-${name}`, label: '默认账号', baseUrl: entry.baseUrl, encryptedKey: entry.encryptedKey }] : [];
@@ -161,7 +164,7 @@ async function readAiConfig(env, includeSecrets = false) {
       if (apiKey) accounts.push({ id: `worker-${defaults.tier}`, ...defaults, ...(includeSecrets ? { apiKey } : {}) });
     }
   }
-  return { systemPrompt: configuredSystemPrompt(stored.systemPrompt), accounts: accounts.map(({ apiKey, envKey, ...account }) => ({ ...account, keyConfigured: true, ...(includeSecrets ? { apiKey } : {}) })) };
+  return { systemPrompt: typeof stored.systemPrompt === 'string' && stored.systemPrompt.trim() ? stored.systemPrompt : systemPrompt, accounts: accounts.map(({ apiKey, envKey, ...account }) => ({ ...account, keyConfigured: true, ...(includeSecrets ? { apiKey } : {}) })) };
 }
 
 async function adminAiConfig(request, env) {
