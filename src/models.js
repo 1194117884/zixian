@@ -117,6 +117,13 @@ function shouldFailover(status) {
   return status === 401 || status === 403 || status === 408 || status === 429 || status >= 500;
 }
 
+function tokenUsage(body, anthropic) {
+  const usage = body?.usage || {};
+  return anthropic
+    ? { inputTokens: Number(usage.input_tokens) || 0, outputTokens: Number(usage.output_tokens) || 0 }
+    : { inputTokens: Number(usage.prompt_tokens) || 0, outputTokens: Number(usage.completion_tokens) || 0 };
+}
+
 export async function generateComposition({ modelId, title, content, instruction, referenceDesign, history, revision = false, env, systemPromptOverride = systemPrompt, providerOverrides, requestKey, fetcher = fetch }) {
   const model = getModel(modelId);
   if (!model) throw new Error('unsupported_model');
@@ -124,8 +131,10 @@ export async function generateComposition({ modelId, title, content, instruction
   if (!config.accounts.length) throw new Error('model_unavailable');
   const prompt = createCompositionPrompt({ title, content, instruction, referenceDesign, revision });
   const messages = [...conversationMessages(history), { role: 'user', content: prompt }];
+  const attempts = [];
   for (const account of orderedAccounts(config.accounts, requestKey)) {
     const anthropic = account.apiFormat === 'anthropic' || (!account.apiFormat && model.provider === 'anthropic-compatible');
+    const attempt = { accountId: account.id || '', platform: account.platform || 'Worker Secret', modelName: account.modelName || model.defaultModel, httpStatus: null, errorCode: null, inputTokens: 0, outputTokens: 0 };
     const request = anthropic
       ? {
           headers: { 'content-type': 'application/json', 'x-api-key': account.apiKey, 'anthropic-version': '2023-06-01' },
@@ -137,15 +146,23 @@ export async function generateComposition({ modelId, title, content, instruction
         };
     try {
       const response = await fetcher(account.baseUrl, { method: 'POST', ...request });
+      attempt.httpStatus = response.status;
       if (!response.ok) {
+        attempt.errorCode = `http_${response.status}`;
+        attempts.push(attempt);
         if (shouldFailover(response.status)) continue;
         throw new Error('model_unavailable');
       }
       const body = await response.json();
       const output = anthropic ? body.content?.[0]?.text : body.choices?.[0]?.message?.content;
-      return parseComposition(output);
+      const composition = parseComposition(output);
+      Object.assign(attempt, tokenUsage(body, anthropic));
+      attempts.push(attempt);
+      return { composition, telemetry: { selected: attempt, attempts } };
     } catch (error) {
       if (error.message === 'model_unavailable') throw error;
+      attempt.errorCode = error.message === 'invalid_model_output' ? 'invalid_model_output' : 'network_error';
+      attempts.push(attempt);
     }
   }
   throw new Error('model_unavailable');

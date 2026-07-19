@@ -19,7 +19,13 @@ function escapeHtml(value) {
 function renderActivity(items) {
   const container = document.querySelector('#recent-activity');
   if (!items.length) { container.innerHTML = '<p>还没有生成记录。</p>'; return; }
-  container.innerHTML = items.map(item => `<article><span>${item.email || '匿名用户'}</span><b>${item.modelLabel}</b><small>${item.costCredits} 积分 · ${item.createdAt}</small></article>`).join('');
+  container.innerHTML = items.map(item => `<article><span>${escapeHtml(item.email || '匿名用户')}</span><b>${escapeHtml(item.providerPlatform || '未记录')} / ${escapeHtml(item.providerModelName || item.modelLabel)}</b><small>${item.inputTokens + item.outputTokens} Token · ${item.attemptCount > 1 ? `已转移 ${item.attemptCount - 1} 次 · ` : ''}${item.costCredits} 积分 · ${item.createdAt}</small></article>`).join('');
+}
+
+function renderChannelRuns(items) {
+  const container = document.querySelector('#channel-runs');
+  if (!items.length) { container.innerHTML = '<p>还没有渠道请求记录。</p>'; return; }
+  container.innerHTML = items.map(item => `<article><span>${escapeHtml(item.providerPlatform)} / ${escapeHtml(item.providerModelName)}</span><b>${item.httpStatus === 200 ? '成功' : item.errorCode || '失败'}</b><small>${item.modelLabel} · ${item.createdAt}</small></article>`).join('');
 }
 
 function fillAiConfig(config) {
@@ -82,6 +88,7 @@ async function boot() {
     text('#credits-used', `累计消耗 ${overview.totals.creditsUsed} 积分`);
     text('#updated-at', `更新于 ${new Date().toLocaleString('zh-CN')}`);
     renderActivity(overview.recentGenerations);
+    renderChannelRuns(overview.recentChannelRuns);
     fillAiConfig(aiConfig);
     denied.hidden = true;
     shell.hidden = false;

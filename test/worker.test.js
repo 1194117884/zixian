@@ -82,7 +82,7 @@ test('model composition only accepts a bounded structured response', () => {
 
 test('model adapter requests constrained JSON and never accepts HTML output directly', async () => {
   let request;
-  const composition = await generateComposition({
+  const generated = await generateComposition({
     modelId: 'fast', title: '标题', content: '内容', instruction: '改成炫彩赛博朋克', history: [{ role: 'user', content: '先做第一版' }], revision: true, env: { DEEPSEEK_API_KEY: 'key' }, systemPromptOverride: '后台提示词', providerOverrides: { deepseek: { apiKey: 'admin-key', baseUrl: 'https://gateway.example/v1/chat/completions' } },
     fetcher: async (url, options) => {
       request = { url, options };
@@ -95,24 +95,28 @@ test('model adapter requests constrained JSON and never accepts HTML output dire
   assert.deepEqual(JSON.parse(request.options.body).response_format, { type: 'json_object' });
   assert.equal(JSON.parse(request.options.body).messages[0].content, '后台提示词');
   assert.equal(JSON.parse(request.options.body).messages[1].content, '先做第一版');
-  assert.deepEqual(composition, { title: '标题', paragraphs: ['正文'], highlight: '重点', design: { background: '#113355', foreground: '#ffffff', accent: '#ffcc00', label: 'MY DESIGN' } });
+  assert.deepEqual(generated.composition, { title: '标题', paragraphs: ['正文'], highlight: '重点', design: { background: '#113355', foreground: '#ffffff', accent: '#ffcc00', label: 'MY DESIGN' } });
 });
 
 test('model adapter spreads requests across accounts and fails over after a rate limit', async () => {
   const attempts = [];
-  const composition = await generateComposition({
+  const generated = await generateComposition({
     modelId: 'fast', title: '标题', content: '内容', instruction: '', requestKey: 'b', env: {},
     providerOverrides: { accounts: [{ platform: '任意平台', apiFormat: 'openai', tier: 'fast', modelName: 'deepseek-chat', apiKey: 'first', baseUrl: 'https://one.example/chat' }, { platform: '任意平台', apiFormat: 'openai', tier: 'fast', modelName: 'deepseek-chat', apiKey: 'second', baseUrl: 'https://two.example/chat' }] },
     fetcher: async (url, options) => {
-      attempts.push({ url, key: options.headers.authorization });
+      attempts.push({ url, key: options.headers.authorization, modelName: JSON.parse(options.body).model });
       if (attempts.length === 1) return new Response('busy', { status: 429 });
-      return new Response(JSON.stringify({ choices: [{ message: { content: '{"title":"标题","paragraphs":["正文"],"highlight":"重点"}' } }] }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"title":"标题","paragraphs":["正文"],"highlight":"重点"}' } }], usage: { prompt_tokens: 21, completion_tokens: 34 } }), { status: 200 });
     }
   });
 
   assert.equal(attempts.length, 2);
   assert.notEqual(attempts[0].key, attempts[1].key);
-  assert.equal(composition.title, '标题');
+  assert.equal(attempts[1].modelName, 'deepseek-chat');
+  assert.equal(generated.composition.title, '标题');
+  assert.equal(generated.telemetry.attempts.length, 2);
+  assert.equal(generated.telemetry.selected.modelName, 'deepseek-chat');
+  assert.equal(generated.telemetry.selected.outputTokens, 34);
 });
 
 test('export uses a fixed R2 key and stores Browser Run PNG output', async () => {

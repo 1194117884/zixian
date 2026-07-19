@@ -47,20 +47,31 @@ async function adminMe(request, env) {
 async function adminOverview(request, env) {
   const identity = await adminUser(request, env);
   if (identity.error) return json({ error: identity.error }, { status: identity.error === 'unauthorized' ? 401 : 403 });
-  const [users, documents, generations, credits, usersToday, documentsToday, recent] = await env.DB.batch([
+  const [users, documents, generations, credits, usersToday, documentsToday, recent, channelRuns] = await env.DB.batch([
     env.DB.prepare('SELECT COUNT(*) AS count FROM users'),
     env.DB.prepare('SELECT COUNT(*) AS count FROM documents'),
     env.DB.prepare("SELECT COUNT(*) AS count FROM generation_jobs WHERE status = 'succeeded'"),
     env.DB.prepare("SELECT COALESCE(-SUM(amount), 0) AS count FROM credit_ledger WHERE reason IN ('generation', 'cloud_render')"),
     env.DB.prepare("SELECT COUNT(*) AS count FROM users WHERE created_at >= datetime('now', '-1 day')"),
     env.DB.prepare("SELECT COUNT(*) AS count FROM documents WHERE created_at >= datetime('now', '-1 day')"),
-    env.DB.prepare("SELECT u.email, g.model_id AS modelId, g.cost_credits AS costCredits, g.created_at AS createdAt FROM generation_jobs g LEFT JOIN users u ON u.id = g.owner_id WHERE g.status = 'succeeded' ORDER BY g.created_at DESC LIMIT 12")
+    env.DB.prepare("SELECT u.email, g.model_id AS modelId, g.cost_credits AS costCredits, g.created_at AS createdAt, g.provider_platform AS providerPlatform, g.provider_model_name AS providerModelName, g.input_tokens AS inputTokens, g.output_tokens AS outputTokens, g.attempt_count AS attemptCount FROM generation_jobs g LEFT JOIN users u ON u.id = g.owner_id WHERE g.status = 'succeeded' ORDER BY g.created_at DESC LIMIT 12"),
+    env.DB.prepare("SELECT a.provider_platform AS providerPlatform, a.provider_model_name AS providerModelName, a.http_status AS httpStatus, a.error_code AS errorCode, a.created_at AS createdAt, g.model_id AS modelId FROM generation_attempts a JOIN generation_jobs g ON g.id = a.generation_job_id ORDER BY a.created_at DESC LIMIT 16")
   ]);
   return json({
     totals: { users: users.results[0].count, documents: documents.results[0].count, generations: generations.results[0].count, creditsUsed: credits.results[0].count },
     today: { users: usersToday.results[0].count, documents: documentsToday.results[0].count },
-    recentGenerations: (recent.results || []).map(item => ({ ...item, modelLabel: modelCatalog[item.modelId]?.label || item.modelId }))
+    recentGenerations: (recent.results || []).map(item => ({ ...item, modelLabel: modelCatalog[item.modelId]?.label || item.modelId })),
+    recentChannelRuns: (channelRuns.results || []).map(item => ({ ...item, modelLabel: modelCatalog[item.modelId]?.label || item.modelId }))
   });
+}
+
+async function recordGenerationTelemetry(env, jobId, telemetry) {
+  const attempts = telemetry.attempts.slice(0, 36);
+  const selected = telemetry.selected;
+  await env.DB.batch([
+    env.DB.prepare('UPDATE generation_jobs SET provider_platform = ?, provider_model_name = ?, provider_account_id = ?, input_tokens = ?, output_tokens = ?, attempt_count = ? WHERE id = ?').bind(selected.platform, selected.modelName, selected.accountId, selected.inputTokens, selected.outputTokens, attempts.length, jobId),
+    ...attempts.map((attempt, index) => env.DB.prepare('INSERT INTO generation_attempts (id, generation_job_id, attempt_index, provider_platform, provider_model_name, provider_account_id, http_status, error_code, input_tokens, output_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id(), jobId, index + 1, attempt.platform, attempt.modelName, attempt.accountId, attempt.httpStatus, attempt.errorCode, attempt.inputTokens, attempt.outputTokens))
+  ]);
 }
 
 const aiConfigKey = 'ai_config';
@@ -496,7 +507,7 @@ async function createGenerationJob(request, env) {
     await env.DB.prepare("UPDATE generation_jobs SET status = 'running' WHERE id = ? AND owner_id = ?").bind(reservation.job.id, ownerId).run();
     try {
       const aiConfig = await readAiConfig(env, true);
-      const composition = await generateComposition({
+      const generated = await generateComposition({
         modelId: payload.modelId,
         title: payload.title,
         content: payload.content,
@@ -505,15 +516,17 @@ async function createGenerationJob(request, env) {
         history: payload.history,
         revision: Boolean(existingDocument),
         systemPromptOverride: aiConfig.systemPrompt,
-        providerOverrides: aiConfig.providers,
+        providerOverrides: aiConfig,
         requestKey: reservation.job.id,
         env
       });
+      const { composition } = generated;
       const generatedContent = [...composition.paragraphs, composition.highlight].join('\n\n');
       const document = existingDocument
         ? await createDocumentVersionForOwner({ ownerId, document: existingDocument, parentVersionId, payload: { title: composition.title, content: generatedContent, design: composition.design }, env })
         : await createDocumentForOwner({ ownerId, payload: { title: composition.title, content: generatedContent, design: composition.design }, env });
       await env.DB.prepare("UPDATE generation_jobs SET document_id = ?, status = 'succeeded', completed_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?").bind(document.id, reservation.job.id, ownerId).run();
+      await recordGenerationTelemetry(env, reservation.job.id, generated.telemetry).catch(error => console.error('generation telemetry write failed', error));
       return json({ job: { ...reservation.job, status: 'succeeded' }, document, composition }, { status: 201 });
     } catch (error) {
       await refundGenerationCredits({ db: env.DB, ownerId, jobId: reservation.job.id, credits: reservation.job.costCredits });
